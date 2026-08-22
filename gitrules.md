@@ -24,7 +24,7 @@
 git pull --rebase origin main
 ```
 
-2. 本地开发，多次 comment
+2. 本地开发，多次 commit
 
 ```bash
 git add .
