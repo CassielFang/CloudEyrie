@@ -19,11 +19,16 @@ export class GameManager extends Component {
         log('[GameManager] Initializing Yunxiu...');
         log('[GameManager] EventBus ready.');
 
+        // 测试 EventBus
+        eventBus.on('test-event', (data) => {
+            log('[GameManager] Received:', data);
+        });
+        eventBus.emit('test-event', { message: 'Hello Yunxiu!' });
+
         eventBus.emit('game-initialized');
     }
 
     protected onLoad(): void {
-        log('[GameManager] Initializing Yunxiu...');
         // 防止重复创建
         if (GameManager.instance !== null) {
             this.destroy()
