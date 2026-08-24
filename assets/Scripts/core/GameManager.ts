@@ -1,7 +1,8 @@
 import { _decorator, Component, director, log } from 'cc';
-const { ccclass, property } = _decorator;
+const { ccclass } = _decorator;
 
 import { eventBus } from './EventBus';
+import { spiritEnergySystem, SpiritEnergyChangedEvent } from './SpiritEnergySystem';
 
 @ccclass('GameManager')
 export class GameManager extends Component {
@@ -21,11 +22,21 @@ export class GameManager extends Component {
 
         // 测试 EventBus
         eventBus.on('test-event', (data) => {
-            log('[GameManager] Received:', data);
+            log('[GameManager] Received: ', data);
         });
         eventBus.emit('test-event', { message: 'Hello Yunxiu!' });
 
         eventBus.emit('game-initialized');
+
+        // 测试 SpiritEnergySystem
+        eventBus.on<SpiritEnergyChangedEvent>('spirit-energy-changed', (data) => {
+            log('[SpiritEnergy] Received: ', data);
+        });
+        log('[SpiritEnergy] ', spiritEnergySystem.getCurrent(), '/', spiritEnergySystem.getMax());
+        spiritEnergySystem.consume(15);
+        log('[SpiritEnergy] after consume 15: ', spiritEnergySystem.getCurrent());
+        spiritEnergySystem.restore(50);
+        log('[SpiritEnergy] after restore 50: ', spiritEnergySystem.getCurrent());
     }
 
     protected onLoad(): void {
