@@ -501,6 +501,8 @@
     "moveSpeed": 5,
     "jumpSpeed": 10,
     "maxJumpCount": 2,
+    "dashSpeed": 30,
+    "dashDuration": 0.15,
     "_id": "158lHbbUpOnLZcEMdAli4J"
   },
   {

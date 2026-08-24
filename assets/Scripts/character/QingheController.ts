@@ -17,14 +17,24 @@ export class QingheController extends Component {
     @property
     private moveSpeed = 5;
     @property
-    private jumpSpeed = 20;
+    private jumpSpeed = 10;
     @property
     private maxJumpCount = 2;
+    @property
+    private dashSpeed = 30;
+    @property
+    private dashDuration = 0.15;
 
     private leftPressed = false;
     private rightPressed = false;
-    private spaceTriggered = false;
+    private jumpRequested = false;
+    private dashRequested = false;
+
     private jumpCount = 0;
+    private isDashing = false;
+    private dashTimer = 0;
+
+    private facingDirection = 1; // 1 = right, -1 = left
 
     private onBeginContact(
         selfCollider: BoxCollider2D,
@@ -52,7 +62,10 @@ export class QingheController extends Component {
                 this.rightPressed = true;
                 break;
             case KeyCode.SPACE:
-                this.spaceTriggered = true;
+                this.jumpRequested = true;
+                break;
+            case KeyCode.KEY_K:
+                this.dashRequested = true;
                 break;
             default: break;
         }
@@ -65,33 +78,54 @@ export class QingheController extends Component {
             case KeyCode.KEY_D: case KeyCode.ARROW_RIGHT:
                 this.rightPressed = false;
                 break;
-            case KeyCode.SPACE:
-                this.spaceTriggered = false;
-                break;
             default: break;
         }
     }
 
-    private handleMovement(): void {
+    private jump(velocity: Vec2): void {
+        if (this.jumpCount >= this.maxJumpCount) {
+            return;
+        }
+        velocity.y += this.jumpSpeed;
+        this.jumpCount += 1;
+    }
+
+    private startDash(velocity: Vec2): void {
+        if (this.jumpCount < 1 || this.isDashing) {
+            return;
+        }
+        velocity.x = this.facingDirection * this.dashSpeed;
+        this.isDashing = true;
+        this.dashTimer = this.dashDuration;
+    }
+    private updateDash(dt: number, velocity: Vec2): void {
+        this.dashTimer -= dt;
+        if (this.dashTimer <= 0) {
+            this.isDashing = false;
+            this.dashTimer = 0;
+            velocity.x = 0;
+            return;
+        }
+    }
+
+    private handleMovement(velocity: Vec2): void {
         let horizontal = 0;
         if (this.leftPressed) {
-            horizontal += -1;
+            horizontal -= 1;
         }
         if (this.rightPressed) {
             horizontal += 1;
         }
 
-        if (horizontal !== 0 || (this.spaceTriggered && this.jumpCount < this.maxJumpCount)) {
-            const velocity = new Vec2(this.rigidBody.linearVelocity);
-            if (horizontal !== 0) {
-                velocity.x = horizontal * this.moveSpeed;
-            }
-            if (this.spaceTriggered && this.jumpCount < this.maxJumpCount) {
-                velocity.y += this.jumpSpeed;
-                this.jumpCount += 1;
-                this.spaceTriggered = false;
-            }
-            this.rigidBody.linearVelocity = velocity;
+        if (horizontal > 0) {
+            this.facingDirection = 1;
+        }
+        else if (horizontal < 0) {
+            this.facingDirection = -1;
+        }
+
+        if (horizontal !== 0) {
+            velocity.x = horizontal * this.moveSpeed;
         }
     }
 
@@ -126,7 +160,24 @@ export class QingheController extends Component {
     }
 
     protected update(dt: number): void {
-        this.handleMovement();
+        const velocity = new Vec2(this.rigidBody.linearVelocity);
+        if (this.dashRequested) {
+            this.startDash(velocity);
+            this.dashRequested = false;
+        }
+        else {
+            if (this.jumpRequested) {
+                this.jump(velocity);
+                this.jumpRequested = false;
+            }
+            this.handleMovement(velocity);
+        }
+
+        if (this.isDashing) {
+            this.updateDash(dt, velocity);
+        }
+
+        this.rigidBody.linearVelocity = velocity;
     }
 
 }
