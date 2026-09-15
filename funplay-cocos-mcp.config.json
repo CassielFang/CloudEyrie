@@ -1,0 +1,27 @@
+{
+  "host": "127.0.0.1",
+  "port": 8765,
+  "portMode": "fixed",
+  "clientConfigEntries": {
+    "claude_code": {
+      "serverName": "cocos-cloudeyrie-63000d",
+      "url": "http://127.0.0.1:8765/",
+      "configPath": "C:\\Users\\FNP20\\.claude.json",
+      "projectIdentity": "63000d1081fd132781f49d87"
+    }
+  },
+  "toolProfile": "full",
+  "enabledTools": [],
+  "disabledTools": [],
+  "enabledToolCategories": [],
+  "disabledToolCategories": [],
+  "enableSessions": false,
+  "enableConsoleLogging": true,
+  "executeJavascriptSafetyChecks": true,
+  "autostart": true,
+  "maxInteractionLogEntries": 50,
+  "lastClientTargetId": "claude_code",
+  "activeToolProfileName": "",
+  "savedToolProfiles": [],
+  "language": "auto"
+}
