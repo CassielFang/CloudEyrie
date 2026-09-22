@@ -7,7 +7,7 @@ export enum CompanionForm {
     Merge = 'merge',    // 灵合形态（二人合一）
 }
 
-/** 输入快照（QingheController 填充；jump/dash/attack 为边沿锁存，消费后清零） */
+/** 输入快照（QingheController 填充；jump/dash 为边沿锁存，消费后清零） */
 export interface MoveInput {
     left: boolean;
     right: boolean;
@@ -15,7 +15,6 @@ export interface MoveInput {
     down: boolean;
     jump: boolean;
     dash: boolean;
-    attack: boolean;
 }
 
 /** 移动参数（由 QingheController 的 @property 填充，注入各形态状态类） */
@@ -37,12 +36,14 @@ export class FormContext {
     public grounded = false;
     /** 是否冲刺中（状态写，控制器读） */
     public isDashing = false;
-    /** 是否攻击中（控制器写，状态读） */
+    /** 是否攻击中（战斗控制器写，形态读） */
     public isAttacking = false;
+    /** 是否格挡中（战斗控制器写，形态读） */
+    public isBlocking = false;
     /** 输入快照 */
     public input: MoveInput = {
         left: false, right: false, up: false, down: false,
-        jump: false, dash: false, attack: false,
+        jump: false, dash: false,
     };
 
     constructor(

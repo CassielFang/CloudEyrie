@@ -52,6 +52,7 @@ const { checkForUpdate } = require('./update-checker');
 const { assertJavascriptSafety } = require('./javascript-safety');
 const { safeStringify } = require('./utils');
 const { SCRIPT_EXECUTION_PACKET } = require('./script-execution');
+const previewRuntime = require('./preview-runtime');
 const IMAGE_DATA_URI_PREFIX = 'data:image/png;base64,';
 
 const TOOL_CATEGORY_RULES = [
@@ -601,7 +602,7 @@ function createToolRegistry({ getRuntimeContext, getStatus, interactionLog, runt
       name: 'list_project_instructions',
       profile: 'core',
       description: '[specialist] List project AI instruction files and Skills for a supported client (defaults to Codex).',
-      inputSchema: createSchema({ clientId: { type: 'string', enum: ['codex', 'claude_code', 'cursor', 'qoder', 'kimi'], description: 'Target Skills client; defaults to Codex.' } }, []),
+      inputSchema: createSchema({ clientId: { type: 'string', enum: ['codex', 'claude_code', 'cursor', 'qoder', 'kimi', 'opencode'], description: 'Target Skills client; defaults to Codex.' } }, []),
       handler: async (args) => {
         const { projectPath } = getRuntimeContext();
         return listProjectInstructions(projectPath, args);
@@ -646,7 +647,7 @@ function createToolRegistry({ getRuntimeContext, getStatus, interactionLog, runt
       inputSchema: createSchema(
         {
           skillName: { type: 'string', description: 'Filesystem-safe project skill name.' },
-          clientId: { type: 'string', enum: ['codex', 'claude_code', 'cursor', 'qoder', 'kimi'], description: 'Target client; defaults to Codex. Kimi uses the nearest Git root.' },
+          clientId: { type: 'string', enum: ['codex', 'claude_code', 'cursor', 'qoder', 'kimi', 'opencode'], description: 'Target client; defaults to Codex. Kimi uses the nearest Git root.' },
           title: { type: 'string', description: 'Human-readable skill title.' },
           description: { type: 'string', description: 'Skill trigger description.' },
           instructions: { type: 'string', description: 'Skill instructions body.' },
@@ -666,7 +667,7 @@ function createToolRegistry({ getRuntimeContext, getStatus, interactionLog, runt
       inputSchema: createSchema(
         {
           skillName: { type: 'string', description: 'Optional filesystem-safe project skill name.' },
-          clientId: { type: 'string', enum: ['codex', 'claude_code', 'cursor', 'qoder', 'kimi'], description: 'Target client; defaults to Codex. Kimi uses the nearest Git root.' },
+          clientId: { type: 'string', enum: ['codex', 'claude_code', 'cursor', 'qoder', 'kimi', 'opencode'], description: 'Target client; defaults to Codex. Kimi uses the nearest Git root.' },
           overwrite: { type: 'boolean', description: 'Allow overwriting an existing skill. Defaults to true.' },
         },
         []
@@ -1671,7 +1672,7 @@ function createToolRegistry({ getRuntimeContext, getStatus, interactionLog, runt
           maxDepth: Number.isFinite(args.maxDepth) ? args.maxDepth : 2,
           includeComponents: true,
         }).catch((error) => ({ ok: false, error: error.message }));
-        const runtime = await sceneBridge.call('getRuntimeState', {}).catch((error) => ({ ok: false, error: error.message }));
+        const runtime = await previewRuntime.controlPreviewToolbar({ action: 'state' }).catch((error) => ({ ok: false, error: error.message }));
         const performance = await sceneBridge.call('getPerformanceSnapshot', {}).catch((error) => ({ ok: false, error: error.message }));
         const diagnostics = args.includeScriptDiagnostics === false
           ? null
@@ -1693,35 +1694,35 @@ function createToolRegistry({ getRuntimeContext, getStatus, interactionLog, runt
     {
       name: 'get_performance_snapshot',
       profile: 'core',
-      description: '[specialist] Return scene scale and runtime performance-oriented counters such as node/component counts, UI counts, depth, memory, and warnings.',
+      description: '[specialist] Return edit-scene scale and performance-oriented counters such as node/component counts, UI counts, depth, memory, and warnings. Its director counters are not Game View preview state.',
       inputSchema: createSchema({}, []),
       handler: async (args) => sceneBridge.call('getPerformanceSnapshot', args),
     },
     {
       name: 'get_runtime_state',
       profile: 'core',
-      description: '[specialist] Return structured Cocos runtime state including pause state, frame count, and scheduler time scale. Prefer this when you want a compact validation snapshot.',
+      description: '[specialist] Return the editor Game View preview running/paused state and toolbar synchronization status, not edit-scene director counters. Does not inspect browser or simulator runtime state.',
       inputSchema: createSchema({}, []),
-      handler: async (args) => sceneBridge.call('getRuntimeState', args),
+      handler: async () => previewRuntime.controlPreviewToolbar({ action: 'state' }),
     },
     {
       name: 'pause_runtime',
       profile: 'full',
-      description: '[core] Pause Cocos director game logic execution.',
+      description: '[core] Pause an active editor Game View preview through the native toolbar. Idempotent; does not pause the edit-scene director, browser, or simulator.',
       inputSchema: createSchema({}, []),
-      handler: async (args) => sceneBridge.call('pauseRuntime', args),
+      handler: async () => previewRuntime.controlPreviewToolbar({ action: 'pause' }),
     },
     {
       name: 'resume_runtime',
       profile: 'full',
-      description: '[core] Resume Cocos director game logic execution.',
+      description: '[core] Resume a paused editor Game View preview through the native toolbar. Idempotent; requires a running Game View preview.',
       inputSchema: createSchema({}, []),
-      handler: async (args) => sceneBridge.call('resumeRuntime', args),
+      handler: async () => previewRuntime.controlPreviewToolbar({ action: 'resume' }),
     },
     {
       name: 'set_time_scale',
       profile: 'full',
-      description: '[core] Set Cocos scheduler time scale for runtime validation.',
+      description: '[core] Set the edit-scene Cocos scheduler time scale. Does not change the separate Game View preview runtime.',
       inputSchema: createSchema(
         {
           scale: { type: 'number', description: 'Time scale from 0 to 100.' },

@@ -6,6 +6,7 @@ const path = require('path');
 const { getProjectIdentity } = require('./config');
 const { readOptionalText, writeTextIfUnchanged } = require('./atomic-file');
 const { findGitRootOrSelf } = require('./skill-platforms');
+const { parseJsonc, updateJsonc } = require('./jsonc');
 
 const SERVER_NAME = 'funplay_cocos';
 
@@ -25,9 +26,26 @@ function getPreviousEntry(config, targetId) {
 
 function isObject(value) { return Boolean(value && typeof value === 'object' && !Array.isArray(value)); }
 
+// Claude Code keys `projects` by a forward-slash path even on Windows, where path.resolve
+// yields backslashes. A backslash key is a distinct entry that Claude Code never reads.
+function getClaudeScopePath(projectPath, platform = process.platform, resolveGitRoot = findGitRootOrSelf) {
+  const resolved = resolveGitRoot(projectPath);
+  return platform === 'win32' ? resolved.replace(/\\/g, '/') : resolved;
+}
+
+// Claude Code preserves whatever drive-letter case its cwd had, so the same directory can
+// already be keyed as `D:/repo` or `d:/repo`. Reuse that key instead of adding a duplicate.
+function resolveProjectKey(projects, scopePath, platform = process.platform) {
+  if (!isObject(projects) || projects[scopePath] !== undefined || platform !== 'win32') return scopePath;
+  const lowered = scopePath.toLowerCase();
+  return Object.keys(projects).find((key) => key.toLowerCase() === lowered) || scopePath;
+}
+
 function getServerContainer(root, target, create = false) {
   if (!isObject(root)) throw new Error('MCP configuration must be a JSON object.');
-  const keys = target.scopePath ? ['projects', target.scopePath, target.rootKey || 'mcpServers'] : [target.rootKey || 'mcpServers'];
+  const keys = target.scopePath
+    ? ['projects', resolveProjectKey(root.projects, target.scopePath, target.platform), target.rootKey || 'mcpServers']
+    : [target.rootKey || 'mcpServers'];
   let current = root;
   for (const key of keys) {
     if (current[key] === undefined) {
@@ -49,7 +67,7 @@ function formatTargetPreview(target) {
 }
 
 function isGeneratedEntry(entry, url) {
-  return isObject(entry) && entry.url === url && Object.keys(entry).every((key) => key === 'url' || (key === 'type' && entry.type === 'http'));
+  return isObject(entry) && entry.url === url && Object.keys(entry).every((key) => key === 'url' || (key === 'type' && (entry.type === 'http' || entry.type === 'remote')));
 }
 
 function canReplaceEntry(target, name, url) {
@@ -100,6 +118,22 @@ function getVSCodeConfigPath(homePath, options = {}) {
   }
 }
 
+function getOpenCodeConfigPath(homePath, options = {}) {
+  const env = options.env || process.env;
+  const existsSync = options.existsSync || fs.existsSync;
+
+  // OpenCode resolves its global config dir cross-platform via xdg-basedir
+  // (packages/core/src/global.ts): XDG_CONFIG_HOME wins, else ~/.config.
+  // There is no APPDATA or macOS Application Support branch.
+  const xdgHome = String(env && env.XDG_CONFIG_HOME || '').trim();
+  const configDir = xdgHome || path.join(homePath, '.config');
+  const dir = path.join(configDir, 'opencode');
+  // globalConfigFile() prefers opencode.jsonc over opencode.json; write
+  // where the user already keeps the file, else the canonical .json.
+  const jsonc = path.join(dir, 'opencode.jsonc');
+  return existsSync(jsonc) ? jsonc : path.join(dir, 'opencode.json');
+}
+
 function getConfiguredDirectory(env, key, fallback) {
   const configured = String(env && env[key] || '').trim();
   return configured || fallback;
@@ -112,7 +146,7 @@ function ensureParent(filePath) {
   }
 }
 
-function readJson(filePath) {
+function readJson(filePath, isJsonc = false) {
   if (!fs.existsSync(filePath)) {
     return {};
   }
@@ -122,12 +156,12 @@ function readJson(filePath) {
     return {};
   }
 
-  return JSON.parse(text);
+  return isJsonc ? parseJsonc(text) : JSON.parse(text);
 }
 
 function configureJsonTarget(target) {
   const original = readOptionalText(target.configPath);
-  const root = original && original.trim() ? JSON.parse(original) : {};
+  const root = target.isJsonc ? parseJsonc(original || '') : (original && original.trim() ? JSON.parse(original) : {});
   const servers = getServerContainer(root, target, true);
   const name = target.serverName || SERVER_NAME;
   const existing = servers[name];
@@ -137,7 +171,8 @@ function configureJsonTarget(target) {
   if (target.migrateLegacy && name !== SERVER_NAME && isGeneratedEntry(servers[SERVER_NAME], target.entry.url)) delete servers[SERVER_NAME];
   if (target.scopePath && target.migrateLegacy && isObject(root.mcpServers) && isGeneratedEntry(root.mcpServers[SERVER_NAME], target.entry.url)) delete root.mcpServers[SERVER_NAME];
   servers[name] = { ...(existing || {}), ...target.entry };
-  writeTextIfUnchanged(target.configPath, JSON.stringify(root, null, 2) + '\n', original);
+  const content = target.isJsonc ? updateJsonc(original || '', root) : JSON.stringify(root, null, 2) + '\n';
+  if (content !== original) writeTextIfUnchanged(target.configPath, content, original);
 }
 
 function configureTomlTarget(target) {
@@ -197,6 +232,8 @@ function getTomlBlocks(content) {
 function buildTargets(config, options = {}) {
   const home = options.homePath || getUserHomePath();
   const env = options.env || process.env;
+  const platform = options.platform || process.platform;
+  const resolveGitRoot = options.resolveGitRoot || findGitRootOrSelf;
   const url = `http://${config.host}:${config.port}/`;
 
   return [
@@ -262,10 +299,20 @@ function buildTargets(config, options = {}) {
       isToml: true,
       url,
     },
+    {
+      id: 'opencode',
+      name: 'OpenCode',
+      configPath: getOpenCodeConfigPath(home, options),
+      rootKey: 'mcp',
+      entry: { type: 'remote', url },
+      isJsonc: true,
+    },
   ].map((target) => config.projectPath ? ({
     ...target,
     serverName: getServerName(config),
-    ...(target.id === 'claude_code' ? { scopePath: findGitRootOrSelf(config.projectPath) } : {}),
+    ...(target.id === 'claude_code'
+      ? { scopePath: getClaudeScopePath(config.projectPath, platform, resolveGitRoot), platform }
+      : {}),
     previousEntry: getPreviousEntry(config, target.id),
     migrateLegacy: config.migrateLegacy === true,
   }) : target);
@@ -290,7 +337,7 @@ function isTargetConfigured(target) {
       return getTomlServerUrl(target) === target.url;
     }
 
-    const root = readJson(target.configPath);
+    const root = readJson(target.configPath, target.isJsonc);
     const servers = getServerContainer(root, target);
     const entry = servers && servers[target.serverName || SERVER_NAME];
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {

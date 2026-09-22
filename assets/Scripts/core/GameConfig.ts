@@ -59,6 +59,24 @@ export interface TideConfig {
     lowTideRegenMult: number;           // 低潮恢复倍率
 }
 
+export interface CombatConfig {
+    baseLightDamage: number;        // 轻击基础伤害（倍率作用于它）
+    comboDamageMult: number[];      // 三段伤害倍率 [1, 1.2, 1.5]（不暴露 Inspector）
+    comboKnockback: number;         // 第三段击退距离 /米
+    comboWindow: number;            // 连击窗口 /秒
+    lightTapThreshold: number;      // 点按判定阈值（<此值=轻击，否则蓄力）
+    heavyChargeTime: number;        // 满蓄时长 /秒
+    heavyFullDamageMult: number;    // 满蓄伤害倍率
+    heavyHalfDamageMult: number;    // 半蓄伤害倍率
+    heavyKnockback: number;         // 重击击退距离 /米
+    blockReduction: number;         // 格挡减伤比例（0.7 = 70%）
+    perfectBlockWindow: number;     // 完美格挡窗口 /秒
+    mistShotDamageRatio: number;    // 灵弹伤害比例（相对轻击）
+    mistShotKnockback: number;      // 灵弹击退（作为水平速度直接施加，比近战小得多）
+    mistShotSpeed: number;          // 灵弹飞行速度
+    mistShotLifetime: number;       // 灵弹存活 /秒
+}
+
 function createDefaultSpiritConfig(): SpiritConfig {
     return {
         max: 100,
@@ -109,15 +127,36 @@ function createDefaultTideConfig(): TideConfig {
     };
 }
 
+function createDefaultCombatConfig(): CombatConfig {
+    return {
+        baseLightDamage: 15,
+        comboDamageMult: [1.0, 1.2, 1.5],
+        comboKnockback: 1.5,
+        comboWindow: 0.3,
+        lightTapThreshold: 0.2,
+        heavyChargeTime: 1.0,
+        heavyFullDamageMult: 2.5,
+        heavyHalfDamageMult: 1.5,
+        heavyKnockback: 3.0,
+        blockReduction: 0.7,
+        perfectBlockWindow: 0.2,
+        mistShotDamageRatio: 0.6,
+        mistShotKnockback: 0.15,
+        mistShotSpeed: 10,
+        mistShotLifetime: 2.0,
+    };
+}
+
 // ============================================================
 // 运行时配置单例 —— 所有系统从这里读取数值
 // 默认值即 v1 参数表；GameConfig 组件 onLoad 时用 Inspector
 // 里的可调值覆盖它，因此系统需惰性读取（getter），不要缓存。
 // ============================================================
 
-export const gameConfig: { spirit: SpiritConfig; tide: TideConfig } = {
+export const gameConfig: { spirit: SpiritConfig; tide: TideConfig; combat: CombatConfig } = {
     spirit: createDefaultSpiritConfig(),
     tide: createDefaultTideConfig(),
+    combat: createDefaultCombatConfig(),
 };
 
 // ============================================================
@@ -201,6 +240,36 @@ export class GameConfig extends Component {
     @property({ group: '灵合', displayName: '结束后休眠/秒' })
     private mergeSleepDuration = 10;
 
+    // ---- 战斗调参 ----
+    @property({ group: '战斗调参', displayName: '轻击基础伤害' })
+    private baseLightDamage = 15;
+    @property({ group: '战斗调参', displayName: '第三段击退' })
+    private comboKnockback = 1.5;
+    @property({ group: '战斗调参', displayName: '连击窗口/秒' })
+    private comboWindow = 0.3;
+    @property({ group: '战斗调参', displayName: '点按阈值/秒' })
+    private lightTapThreshold = 0.2;
+    @property({ group: '战斗调参', displayName: '满蓄时长/秒' })
+    private heavyChargeTime = 1.0;
+    @property({ group: '战斗调参', displayName: '满蓄伤害倍率' })
+    private heavyFullDamageMult = 2.5;
+    @property({ group: '战斗调参', displayName: '半蓄伤害倍率' })
+    private heavyHalfDamageMult = 1.5;
+    @property({ group: '战斗调参', displayName: '重击击退' })
+    private heavyKnockback = 3.0;
+    @property({ group: '战斗调参', displayName: '格挡减伤比例' })
+    private blockReduction = 0.7;
+    @property({ group: '战斗调参', displayName: '完美格挡窗口/秒' })
+    private perfectBlockWindow = 0.2;
+    @property({ group: '战斗调参', displayName: '灵弹伤害比例' })
+    private mistShotDamageRatio = 0.6;
+    @property({ group: '战斗调参', displayName: '灵弹击退' })
+    private mistShotKnockback = 0.15;
+    @property({ group: '战斗调参', displayName: '灵弹速度' })
+    private mistShotSpeed = 10;
+    @property({ group: '战斗调参', displayName: '灵弹存活/秒' })
+    private mistShotLifetime = 2.0;
+
     // ---- 灵脉潮汐 ----
     @property({ group: '灵脉潮汐', displayName: '周期/秒' })
     private tidePeriod = 120;
@@ -256,6 +325,25 @@ export class GameConfig extends Component {
             highTideRegenMult: this.highTideRegenMult,
             highTideEnemyActivityMult: this.highTideEnemyActivityMult,
             lowTideRegenMult: this.lowTideRegenMult,
+        };
+
+        gameConfig.combat = {
+            baseLightDamage: this.baseLightDamage,
+            // 三段倍率不暴露 Inspector，沿用默认 [1, 1.2, 1.5]
+            comboDamageMult: [1.0, 1.2, 1.5],
+            comboKnockback: this.comboKnockback,
+            comboWindow: this.comboWindow,
+            lightTapThreshold: this.lightTapThreshold,
+            heavyChargeTime: this.heavyChargeTime,
+            heavyFullDamageMult: this.heavyFullDamageMult,
+            heavyHalfDamageMult: this.heavyHalfDamageMult,
+            heavyKnockback: this.heavyKnockback,
+            blockReduction: this.blockReduction,
+            perfectBlockWindow: this.perfectBlockWindow,
+            mistShotDamageRatio: this.mistShotDamageRatio,
+            mistShotKnockback: this.mistShotKnockback,
+            mistShotSpeed: this.mistShotSpeed,
+            mistShotLifetime: this.mistShotLifetime,
         };
 
         eventBus.emit('game-config-ready', gameConfig);

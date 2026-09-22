@@ -2,7 +2,7 @@ import { _decorator, Component, director, log } from 'cc';
 const { ccclass } = _decorator;
 
 import { eventBus } from './EventBus';
-import { spiritEnergySystem, SpiritEnergyChangedEvent } from './SpiritEnergySystem';
+import { spiritEnergySystem } from './SpiritEnergySystem';
 
 @ccclass('GameManager')
 export class GameManager extends Component {
@@ -16,38 +16,43 @@ export class GameManager extends Component {
         return GameManager.instance;
     }
 
+    /** 灵炁冒烟测试开关。需要排查灵炁系统时手动置 true */
+    private static readonly DEBUG_SPIRIT_SELFTEST = false;
+
     private initialize(): void {
         log('[GameManager] Initializing Yunxiu...');
         eventBus.emit('game-initialized');
 
-        // 自测 SpiritEnergySystem（v1 参数）
-        eventBus.on<SpiritEnergyChangedEvent>('spirit-energy-changed', (data) => {
-            log('[SpiritEnergy] changed: ', data);
-        });
-
+        // 灵炁当前值看左上角的调试 HUD（DebugHud）。
+        // 这里**不要**挂 spirit-energy-changed 监听打日志 —— 灵炁是逐帧变化的，
+        // 一挂就会把控制台刷满，把战斗日志全淹掉。
         spiritEnergySystem.resetToInitial();
-        log('[SpiritEnergy] 初始 80/100 -> ', spiritEnergySystem.getCurrent());
 
-        spiritEnergySystem.consume(30);
-        log('[SpiritEnergy] 消耗30 -> ', spiritEnergySystem.getCurrent());
+        if (GameManager.DEBUG_SPIRIT_SELFTEST) {
+            this.runSpiritSelfTest();
+        }
+    }
 
-        spiritEnergySystem.setInCombat(false);
-        spiritEnergySystem.update(2);
-        log('[SpiritEnergy] 非战斗恢复2秒(+10) -> ', spiritEnergySystem.getCurrent());
-
-        spiritEnergySystem.setInCombat(true);
-        spiritEnergySystem.update(2);
-        log('[SpiritEnergy] 战斗恢复2秒(+2) -> ', spiritEnergySystem.getCurrent());
-
-        spiritEnergySystem.setInSpring(true);
-        spiritEnergySystem.update(1);
-        log('[SpiritEnergy] 灵泉恢复1秒(+30) -> ', spiritEnergySystem.getCurrent());
-
-        // 复位，避免自测污染游戏状态
-        spiritEnergySystem.setInCombat(false);
-        spiritEnergySystem.setInSpring(false);
-        spiritEnergySystem.resetToInitial();
-        log('[SpiritEnergy] 自测结束，复位 -> ', spiritEnergySystem.getCurrent());
+    /** 冒烟测试：验证消耗 / 非战斗恢复 / 战斗恢复 / 灵泉恢复四档数值 */
+    private runSpiritSelfTest(): void {
+        const s = spiritEnergySystem;
+        s.resetToInitial();
+        log('[SpiritEnergy][自测] 初始 -> ', s.getCurrent());
+        s.consume(30);
+        log('[SpiritEnergy][自测] 消耗30 -> ', s.getCurrent());
+        s.setInCombat(false);
+        s.update(2);
+        log('[SpiritEnergy][自测] 非战斗恢复2秒(+10) -> ', s.getCurrent());
+        s.setInCombat(true);
+        s.update(2);
+        log('[SpiritEnergy][自测] 战斗恢复2秒(+2) -> ', s.getCurrent());
+        s.setInSpring(true);
+        s.update(1);
+        log('[SpiritEnergy][自测] 灵泉恢复1秒(+30) -> ', s.getCurrent());
+        s.setInCombat(false);
+        s.setInSpring(false);
+        s.resetToInitial();
+        log('[SpiritEnergy][自测] 结束，复位 -> ', s.getCurrent());
     }
 
     protected onLoad(): void {

@@ -14,26 +14,29 @@ export class EntityForm implements ICompanionForm {
         const velocity = rigidBody.linearVelocity;
 
         // 冲刺（踏云闪：需已起跳）
-        if (input.dash && !ctx.isAttacking && this.jumpCount >= 1 && !ctx.isDashing) {
+        if (input.dash && !ctx.isAttacking && !ctx.isBlocking && this.jumpCount >= 1 && !ctx.isDashing) {
             velocity.x = ctx.facing * move.dashSpeed;
             ctx.isDashing = true;
             this.dashTimer = 0;
             input.dash = false;
-            input.attack = false;
             log('[Qinghe Controller] start Dash');
         }
 
         // 跳跃（二段跳）
-        if (input.jump && !ctx.isDashing && !ctx.isAttacking) {
+        if (input.jump && !ctx.isDashing && !ctx.isAttacking && !ctx.isBlocking) {
             if (this.jumpCount < move.maxJumpCount) {
                 velocity.y += move.jumpSpeed;
                 this.jumpCount += 1;
+                // 起跳即离地：物理接触回调（END_CONTACT）要等物理步进后才到，
+                // 不在此处主动置 false，本帧末尾的「着地重置」会把刚加上去的
+                // jumpCount 抹掉，导致跳过一次后踏云闪（要求 jumpCount>=1）不生效。
+                ctx.grounded = false;
             }
             input.jump = false;
         }
 
         // 水平移动
-        if (!ctx.isDashing) {
+        if (!ctx.isDashing && !ctx.isBlocking) {
             let h = 0;
             if (input.left) h -= 1;
             if (input.right) h += 1;
@@ -53,7 +56,7 @@ export class EntityForm implements ICompanionForm {
             }
         }
 
-        // 着地重置二段跳
+        // 着地重置二段跳（起跳当帧 ctx.grounded 已被上面的跳跃分支置为 false，不会误清）
         if (ctx.grounded) {
             this.jumpCount = 0;
         }
