@@ -8,6 +8,18 @@
       "url": "http://127.0.0.1:8765/",
       "configPath": "C:\\Users\\FNP20\\.claude.json",
       "projectIdentity": "63000d1081fd132781f49d87"
+    },
+    "codex": {
+      "serverName": "cocos-cloudeyrie-7110f0",
+      "url": "http://127.0.0.1:8765/",
+      "configPath": "C:\\Users\\13685\\.codex\\config.toml",
+      "projectIdentity": "7110f023215c7c6f8b2888db"
+    },
+    "vscode": {
+      "serverName": "cocos-cloudeyrie-7110f0",
+      "url": "http://127.0.0.1:8765/",
+      "configPath": "C:\\Users\\13685\\AppData\\Roaming\\Code\\User\\mcp.json",
+      "projectIdentity": "7110f023215c7c6f8b2888db"
     }
   },
   "toolProfile": "full",
@@ -20,7 +32,7 @@
   "executeJavascriptSafetyChecks": true,
   "autostart": true,
   "maxInteractionLogEntries": 50,
-  "lastClientTargetId": "claude_code",
+  "lastClientTargetId": "codex",
   "activeToolProfileName": "",
   "savedToolProfiles": [],
   "language": "auto"

@@ -88,6 +88,17 @@ export class SpiritEnergySystem {
     }
 
     /**
+     * 受到伤害（敌人命中玩家）：扣除灵炁，最低到 0。
+     * 与 consume 不同：允许「扣穿」——不足部分直接清零，而不是整次拒绝。
+     */
+    public damage(amount: number): void {
+        if (amount <= 0) {
+            return;
+        }
+        this.setCurrent(this.current - amount);
+    }
+
+    /**
      * 恢复灵炁（不会超过上限）
      */
     public restore(amount: number): void {

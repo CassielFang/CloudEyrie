@@ -77,6 +77,20 @@ export interface CombatConfig {
     mistShotLifetime: number;       // 灵弹存活 /秒
 }
 
+export interface EnemyConfig {
+    patrolSpeed: number;        // 巡逻速度 (物理单位/秒)
+    chaseSpeed: number;         // 追击速度 (物理单位/秒)
+    sightRange: number;         // 发现玩家距离 (像素，与节点坐标同尺度)
+    attackRange: number;        // 攻击判定距离 (像素)
+    attackCooldown: number;     // 攻击间隔 /秒
+    attackStartup: number;      // 攻击前摇 /秒
+    attackDuration: number;     // 攻击总时长 /秒
+    patrolRange: number;        // 巡逻往返范围（相对出生点，像素）
+    patrolPause: number;        // 巡逻点停留 /秒
+    discoverDuration: number;   // 发现反应时间 /秒
+    deathDuration: number;      // 死亡表现时长 /秒
+}
+
 function createDefaultSpiritConfig(): SpiritConfig {
     return {
         max: 100,
@@ -127,6 +141,22 @@ function createDefaultTideConfig(): TideConfig {
     };
 }
 
+function createDefaultEnemyConfig(): EnemyConfig {
+    return {
+        patrolSpeed: 1.2,
+        chaseSpeed: 4.0,
+        sightRange: 170,
+        attackRange: 85,
+        attackCooldown: 1.2,
+        attackStartup: 0.3,
+        attackDuration: 0.55,
+        patrolRange: 140,
+        patrolPause: 0.8,
+        discoverDuration: 0.45,
+        deathDuration: 0.5,
+    };
+}
+
 function createDefaultCombatConfig(): CombatConfig {
     return {
         baseLightDamage: 15,
@@ -153,10 +183,11 @@ function createDefaultCombatConfig(): CombatConfig {
 // 里的可调值覆盖它，因此系统需惰性读取（getter），不要缓存。
 // ============================================================
 
-export const gameConfig: { spirit: SpiritConfig; tide: TideConfig; combat: CombatConfig } = {
+export const gameConfig: { spirit: SpiritConfig; tide: TideConfig; combat: CombatConfig; enemy: EnemyConfig } = {
     spirit: createDefaultSpiritConfig(),
     tide: createDefaultTideConfig(),
     combat: createDefaultCombatConfig(),
+    enemy: createDefaultEnemyConfig(),
 };
 
 // ============================================================
@@ -280,6 +311,30 @@ export class GameConfig extends Component {
     @property({ group: '灵脉潮汐', displayName: '低潮恢复倍率' })
     private lowTideRegenMult = 0.5;
 
+    // ---- 小怪 AI ----
+    @property({ group: '小怪AI', displayName: '巡逻速度' })
+    private enemyPatrolSpeed = 1.2;
+    @property({ group: '小怪AI', displayName: '追击速度' })
+    private enemyChaseSpeed = 4.0;
+    @property({ group: '小怪AI', displayName: '发现距离' })
+    private enemySightRange = 170;
+    @property({ group: '小怪AI', displayName: '攻击距离' })
+    private enemyAttackRange = 85;
+    @property({ group: '小怪AI', displayName: '攻击间隔/秒' })
+    private enemyAttackCooldown = 1.2;
+    @property({ group: '小怪AI', displayName: '攻击前摇/秒' })
+    private enemyAttackStartup = 0.3;
+    @property({ group: '小怪AI', displayName: '攻击总时长/秒' })
+    private enemyAttackDuration = 0.55;
+    @property({ group: '小怪AI', displayName: '巡逻范围' })
+    private enemyPatrolRange = 140;
+    @property({ group: '小怪AI', displayName: '巡逻点停留/秒' })
+    private enemyPatrolPause = 0.8;
+    @property({ group: '小怪AI', displayName: '发现反应/秒' })
+    private enemyDiscoverDuration = 0.45;
+    @property({ group: '小怪AI', displayName: '死亡表现/秒' })
+    private enemyDeathDuration = 0.5;
+
     protected onLoad(): void {
         gameConfig.spirit = {
             max: this.spiritMax,
@@ -344,6 +399,20 @@ export class GameConfig extends Component {
             mistShotKnockback: this.mistShotKnockback,
             mistShotSpeed: this.mistShotSpeed,
             mistShotLifetime: this.mistShotLifetime,
+        };
+
+        gameConfig.enemy = {
+            patrolSpeed: this.enemyPatrolSpeed,
+            chaseSpeed: this.enemyChaseSpeed,
+            sightRange: this.enemySightRange,
+            attackRange: this.enemyAttackRange,
+            attackCooldown: this.enemyAttackCooldown,
+            attackStartup: this.enemyAttackStartup,
+            attackDuration: this.enemyAttackDuration,
+            patrolRange: this.enemyPatrolRange,
+            patrolPause: this.enemyPatrolPause,
+            discoverDuration: this.enemyDiscoverDuration,
+            deathDuration: this.enemyDeathDuration,
         };
 
         eventBus.emit('game-config-ready', gameConfig);

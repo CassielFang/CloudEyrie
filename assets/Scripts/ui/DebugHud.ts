@@ -167,7 +167,7 @@ export class DebugHud extends Component {
                 this.enemyText.string = '敌人  （未找到 Damageable）';
                 this.setBarWidth(this.enemyFill, 0);
             }
-            else if (!this.enemy.node.active) {
+            else if (!this.enemy.node.active || this.enemy.getHp() <= 0) {
                 this.enemyText.string = '敌人  已击杀';
                 this.setBarWidth(this.enemyFill, 0);
             }

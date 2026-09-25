@@ -62,8 +62,18 @@ export class Damageable extends Component {
         }
     }
 
+    /**
+     * 死亡前的自定义处理（敌人 AI 可挂上，播放死亡表现后自行停用节点）。
+     * 未设置时维持原行为：立即停用节点。
+     */
+    public onDeath: ((self: Damageable) => void) | null = null;
+
     private die(): void {
         eventBus.emit('enemy-died', { node: this.node, name: this.node.name });
+        if (this.onDeath) {
+            this.onDeath(this);
+            return;
+        }
         this.node.active = false;
     }
 }
