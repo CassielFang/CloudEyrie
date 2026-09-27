@@ -82,9 +82,11 @@ export interface EnemyConfig {
     chaseSpeed: number;         // 追击速度 (物理单位/秒)
     sightRange: number;         // 发现玩家距离 (像素，与节点坐标同尺度)
     attackRange: number;        // 攻击判定距离 (像素)
+    verticalTolerance: number;  // 垂直容差 (像素)：|Δy| 超过它就算「不在同一层」，既不发现也不攻击
     attackCooldown: number;     // 攻击间隔 /秒
     attackStartup: number;      // 攻击前摇 /秒
     attackDuration: number;     // 攻击总时长 /秒
+    hitStunDuration: number;    // 受击硬直 /秒（硬直期间不写状态机速度，只跑击退曲线）
     patrolRange: number;        // 巡逻往返范围（相对出生点，像素）
     patrolPause: number;        // 巡逻点停留 /秒
     discoverDuration: number;   // 发现反应时间 /秒
@@ -144,12 +146,14 @@ function createDefaultTideConfig(): TideConfig {
 function createDefaultEnemyConfig(): EnemyConfig {
     return {
         patrolSpeed: 1.2,
-        chaseSpeed: 4.0,
-        sightRange: 170,
-        attackRange: 85,
-        attackCooldown: 1.2,
+        chaseSpeed: 3.2,
+        sightRange: 140,
+        attackRange: 72,
+        verticalTolerance: 70,
+        attackCooldown: 1.8,
         attackStartup: 0.3,
         attackDuration: 0.55,
+        hitStunDuration: 0.3,
         patrolRange: 140,
         patrolPause: 0.8,
         discoverDuration: 0.45,
@@ -192,148 +196,163 @@ export const gameConfig: { spirit: SpiritConfig; tide: TideConfig; combat: Comba
 
 // ============================================================
 // 可调组件 —— 挂到常驻 GameManager 节点，参数即可在 Inspector 中调整
+//
+// 分组约定（别再"顺手统一"成接口的顺序）：
+//   - **面板**按「调什么的时候一起看」分组（青禾·战斗、小怪…），
+//     所以同一组里可能混着来自 SpiritConfig / CombatConfig 不同接口的字段
+//     —— 比如「青禾·战斗」里轻击的灵炁花费在 SpiritConfig、基础伤害在 CombatConfig。
+//   - **接口**按「哪个系统读它」划分，onLoad 里的赋值块逐项镜像接口顺序。
+//   两者是刻意不同的两个视角，改分组只动 group / displayName，**不要动字段名**：
+//   序列化按字段名走，改名会让 main.scene 里已存的值静默失效、回落到默认值。
+//
+// 组数刻意压在 8 个以内：Inspector 里每个分组标题都要占一行，面板高度有限，
+// 组一多就会把后面的属性挤出可视区（真出过，16 组时后面几组够不着）。
+// 所以**用组内顺序表达子概念**：「小怪」里 移动4 → 感知3 → 攻击6 → 受击与死亡2
+// 依次排下来，而不是再拆成四个组。
 // ============================================================
 
 @ccclass('GameConfig')
 export class GameConfig extends Component {
 
-    // ---- 灵炁池 ----
-    @property({ group: '灵炁池', displayName: '上限' })
+    // ---- 灵炁 ----
+    @property({ group: '灵炁', displayName: '上限' })
     private spiritMax = 100;
-    @property({ group: '灵炁池', displayName: '初始值' })
+    @property({ group: '灵炁', displayName: '初始值' })
     private spiritInitial = 80;
-    @property({ group: '灵炁池', displayName: '非战斗恢复/秒' })
+    @property({ group: '灵炁', displayName: '非战斗恢复/秒' })
     private regenOutOfCombat = 5;
-    @property({ group: '灵炁池', displayName: '战斗恢复/秒' })
+    @property({ group: '灵炁', displayName: '战斗恢复/秒' })
     private regenInCombat = 1;
-    @property({ group: '灵炁池', displayName: '灵泉恢复/秒' })
+    @property({ group: '灵炁', displayName: '灵泉恢复/秒' })
     private springRestoreRate = 30;
-    @property({ group: '灵炁池', displayName: '灵泉恢复上限比率' })
+    @property({ group: '灵炁', displayName: '灵泉恢复上限比率' })
     private springRestoreCapRatio = 1;
-
-    // ---- 形态切换 ----
-    @property({ group: '形态切换', displayName: '实体→灵雾' })
-    private switchEntityToMist = 10;
-    @property({ group: '形态切换', displayName: '灵雾→实体' })
-    private switchMistToEntity = 5;
-    @property({ group: '形态切换', displayName: '灵雾→灵合' })
-    private switchMistToMerge = 30;
-    @property({ group: '形态切换', displayName: '进入灵合最低灵炁' })
-    private mergeMinSpirit = 50;
-    @property({ group: '形态切换', displayName: '灵合→实体' })
-    private switchMergeToEntity = 15;
-    @property({ group: '形态切换', displayName: '灵合→灵雾' })
-    private switchMergeToMist = 10;
-    @property({ group: '形态切换', displayName: '强制切灵雾阈值' })
-    private forcedMistThreshold = 10;
-    @property({ group: '形态切换', displayName: '切换硬直/秒' })
-    private switchLockDuration = 0.5;
-
-    // ---- 战斗消耗 ----
-    @property({ group: '战斗消耗', displayName: '轻击' })
-    private lightAttackCost = 8;
-    @property({ group: '战斗消耗', displayName: '重击' })
-    private heavyAttackCost = 15;
-    @property({ group: '战斗消耗', displayName: '踏云闪' })
-    private cloudDashCost = 12;
-    @property({ group: '战斗消耗', displayName: '灵雾普攻/发' })
-    private mistShotCost = 5;
-    @property({ group: '战斗消耗', displayName: '灵合净化/秒' })
-    private mergePurifyCostPerSec = 20;
-    @property({ group: '战斗消耗', displayName: '灵合范围攻击' })
-    private mergeBurstCost = 30;
-    @property({ group: '战斗消耗', displayName: '格挡' })
-    private blockCost = 10;
-
-    // ---- 灵雾持续消耗 ----
-    @property({ group: '灵雾消耗', displayName: '基础/秒' })
-    private mistBaseDrain = 3;
-    @property({ group: '灵雾消耗', displayName: '飞行额外/秒' })
-    private mistFlyDrainExtra = 2;
-    @property({ group: '灵雾消耗', displayName: '穿越障碍/次' })
-    private mistPassObstacleCost = 20;
-
-    // ---- 敌人伤害 ----
-    @property({ group: '敌人伤害', displayName: '阳浊普攻' })
-    private enemyYangMeleeDamage = 15;
-    @property({ group: '敌人伤害', displayName: '阴浊远程' })
-    private enemyYinRangedDamage = 10;
-    @property({ group: '敌人伤害', displayName: 'BOSS普攻' })
-    private bossMeleeDamage = 20;
-    @property({ group: '敌人伤害', displayName: 'BOSS技能' })
-    private bossSkillDamage = 35;
-    @property({ group: '敌人伤害', displayName: '浊湮接触/秒' })
-    private corruptionContactDrain = 5;
-
-    // ---- 灵合冷却与休眠 ----
-    @property({ group: '灵合', displayName: '冷却/秒' })
-    private mergeCooldown = 20;
-    @property({ group: '灵合', displayName: '结束后休眠/秒' })
-    private mergeSleepDuration = 10;
-
-    // ---- 战斗调参 ----
-    @property({ group: '战斗调参', displayName: '轻击基础伤害' })
-    private baseLightDamage = 15;
-    @property({ group: '战斗调参', displayName: '第三段击退' })
-    private comboKnockback = 1.5;
-    @property({ group: '战斗调参', displayName: '连击窗口/秒' })
-    private comboWindow = 0.3;
-    @property({ group: '战斗调参', displayName: '点按阈值/秒' })
-    private lightTapThreshold = 0.2;
-    @property({ group: '战斗调参', displayName: '满蓄时长/秒' })
-    private heavyChargeTime = 1.0;
-    @property({ group: '战斗调参', displayName: '满蓄伤害倍率' })
-    private heavyFullDamageMult = 2.5;
-    @property({ group: '战斗调参', displayName: '半蓄伤害倍率' })
-    private heavyHalfDamageMult = 1.5;
-    @property({ group: '战斗调参', displayName: '重击击退' })
-    private heavyKnockback = 3.0;
-    @property({ group: '战斗调参', displayName: '格挡减伤比例' })
-    private blockReduction = 0.7;
-    @property({ group: '战斗调参', displayName: '完美格挡窗口/秒' })
-    private perfectBlockWindow = 0.2;
-    @property({ group: '战斗调参', displayName: '灵弹伤害比例' })
-    private mistShotDamageRatio = 0.6;
-    @property({ group: '战斗调参', displayName: '灵弹击退' })
-    private mistShotKnockback = 0.15;
-    @property({ group: '战斗调参', displayName: '灵弹速度' })
-    private mistShotSpeed = 10;
-    @property({ group: '战斗调参', displayName: '灵弹存活/秒' })
-    private mistShotLifetime = 2.0;
 
     // ---- 灵脉潮汐 ----
     @property({ group: '灵脉潮汐', displayName: '周期/秒' })
     private tidePeriod = 120;
     @property({ group: '灵脉潮汐', displayName: '高潮恢复倍率' })
     private highTideRegenMult = 2.0;
-    @property({ group: '灵脉潮汐', displayName: '高潮敌人活性倍率' })
-    private highTideEnemyActivityMult = 1.2;
     @property({ group: '灵脉潮汐', displayName: '低潮恢复倍率' })
     private lowTideRegenMult = 0.5;
+    @property({ group: '灵脉潮汐', displayName: '高潮敌人活性倍率' })
+    private highTideEnemyActivityMult = 1.2;
 
-    // ---- 小怪 AI ----
-    @property({ group: '小怪AI', displayName: '巡逻速度' })
+    // ---- 形态 ----
+    @property({ group: '形态', displayName: '切换硬直/秒' })
+    private switchLockDuration = 0.5;
+    @property({ group: '形态', displayName: '强制切灵雾阈值' })
+    private forcedMistThreshold = 10;
+    @property({ group: '形态', displayName: '实体→灵雾' })
+    private switchEntityToMist = 10;
+    @property({ group: '形态', displayName: '灵雾→实体' })
+    private switchMistToEntity = 5;
+    @property({ group: '形态', displayName: '灵雾基础消耗/秒' })
+    private mistBaseDrain = 3;
+    @property({ group: '形态', displayName: '灵雾飞行额外/秒' })
+    private mistFlyDrainExtra = 2;
+    @property({ group: '形态', displayName: '灵雾穿越障碍/次' })
+    private mistPassObstacleCost = 20;
+    @property({ group: '形态', displayName: '灵雾→灵合' })
+    private switchMistToMerge = 30;
+    @property({ group: '形态', displayName: '进入灵合最低灵炁' })
+    private mergeMinSpirit = 50;
+    @property({ group: '形态', displayName: '灵合→实体' })
+    private switchMergeToEntity = 15;
+    @property({ group: '形态', displayName: '灵合→灵雾' })
+    private switchMergeToMist = 10;
+    @property({ group: '形态', displayName: '灵合净化/秒' })
+    private mergePurifyCostPerSec = 20;
+    @property({ group: '形态', displayName: '灵合范围攻击' })
+    private mergeBurstCost = 30;
+    @property({ group: '形态', displayName: '灵合冷却/秒' })
+    private mergeCooldown = 20;
+    @property({ group: '形态', displayName: '灵合结束后休眠/秒' })
+    private mergeSleepDuration = 10;
+
+    // ---- 青禾·战斗 ----
+    @property({ group: '青禾·战斗', displayName: '轻击灵炁花费' })
+    private lightAttackCost = 8;
+    @property({ group: '青禾·战斗', displayName: '轻击基础伤害' })
+    private baseLightDamage = 15;
+    @property({ group: '青禾·战斗', displayName: '轻击第三段击退' })
+    private comboKnockback = 1.5;
+    @property({ group: '青禾·战斗', displayName: '轻击连击窗口/秒' })
+    private comboWindow = 0.3;
+    @property({ group: '青禾·战斗', displayName: '重击灵炁花费' })
+    private heavyAttackCost = 15;
+    @property({ group: '青禾·战斗', displayName: '重击点按阈值/秒' })
+    private lightTapThreshold = 0.2;
+    @property({ group: '青禾·战斗', displayName: '重击满蓄时长/秒' })
+    private heavyChargeTime = 1.0;
+    @property({ group: '青禾·战斗', displayName: '重击满蓄倍率' })
+    private heavyFullDamageMult = 2.5;
+    @property({ group: '青禾·战斗', displayName: '重击半蓄倍率' })
+    private heavyHalfDamageMult = 1.5;
+    @property({ group: '青禾·战斗', displayName: '重击击退' })
+    private heavyKnockback = 3.0;
+    @property({ group: '青禾·战斗', displayName: '格挡灵炁花费' })
+    private blockCost = 10;
+    @property({ group: '青禾·战斗', displayName: '格挡减伤比例' })
+    private blockReduction = 0.7;
+    @property({ group: '青禾·战斗', displayName: '完美格挡窗口/秒' })
+    private perfectBlockWindow = 0.2;
+    @property({ group: '青禾·战斗', displayName: '踏云闪灵炁花费' })
+    private cloudDashCost = 12;
+
+    // ---- 灵雾·灵弹 ----
+    @property({ group: '灵雾·灵弹', displayName: '灵炁花费/发' })
+    private mistShotCost = 5;
+    @property({ group: '灵雾·灵弹', displayName: '伤害比例（相对轻击）' })
+    private mistShotDamageRatio = 0.6;
+    @property({ group: '灵雾·灵弹', displayName: '击退' })
+    private mistShotKnockback = 0.15;
+    @property({ group: '灵雾·灵弹', displayName: '速度' })
+    private mistShotSpeed = 10;
+    @property({ group: '灵雾·灵弹', displayName: '存活/秒' })
+    private mistShotLifetime = 2.0;
+
+    // ---- 小怪 ----
+    @property({ group: '小怪', displayName: '巡逻速度' })
     private enemyPatrolSpeed = 1.2;
-    @property({ group: '小怪AI', displayName: '追击速度' })
-    private enemyChaseSpeed = 4.0;
-    @property({ group: '小怪AI', displayName: '发现距离' })
-    private enemySightRange = 170;
-    @property({ group: '小怪AI', displayName: '攻击距离' })
-    private enemyAttackRange = 85;
-    @property({ group: '小怪AI', displayName: '攻击间隔/秒' })
-    private enemyAttackCooldown = 1.2;
-    @property({ group: '小怪AI', displayName: '攻击前摇/秒' })
-    private enemyAttackStartup = 0.3;
-    @property({ group: '小怪AI', displayName: '攻击总时长/秒' })
-    private enemyAttackDuration = 0.55;
-    @property({ group: '小怪AI', displayName: '巡逻范围' })
+    @property({ group: '小怪', displayName: '追击速度' })
+    private enemyChaseSpeed = 3.2;
+    @property({ group: '小怪', displayName: '巡逻范围' })
     private enemyPatrolRange = 140;
-    @property({ group: '小怪AI', displayName: '巡逻点停留/秒' })
+    @property({ group: '小怪', displayName: '巡逻点停留/秒' })
     private enemyPatrolPause = 0.8;
-    @property({ group: '小怪AI', displayName: '发现反应/秒' })
+    @property({ group: '小怪', displayName: '发现距离' })
+    private enemySightRange = 140;
+    @property({ group: '小怪', displayName: '垂直容差（像素）' })
+    private enemyVerticalTolerance = 70;
+    @property({ group: '小怪', displayName: '发现反应/秒' })
     private enemyDiscoverDuration = 0.45;
-    @property({ group: '小怪AI', displayName: '死亡表现/秒' })
+    @property({ group: '小怪', displayName: '攻击距离' })
+    private enemyAttackRange = 72;
+    @property({ group: '小怪', displayName: '攻击前摇/秒' })
+    private enemyAttackStartup = 0.3;
+    @property({ group: '小怪', displayName: '攻击总时长/秒' })
+    private enemyAttackDuration = 0.55;
+    @property({ group: '小怪', displayName: '攻击间隔/秒' })
+    private enemyAttackCooldown = 1.8;
+    @property({ group: '小怪', displayName: '对玩家伤害（阳浊普攻）' })
+    private enemyYangMeleeDamage = 15;
+    @property({ group: '小怪', displayName: '对玩家伤害（阴浊远程）' })
+    private enemyYinRangedDamage = 10;
+    @property({ group: '小怪', displayName: '受击硬直/秒' })
+    private enemyHitStunDuration = 0.3;
+    @property({ group: '小怪', displayName: '死亡表现/秒' })
     private enemyDeathDuration = 0.5;
+
+    // ---- BOSS ----
+    @property({ group: 'BOSS', displayName: '普攻' })
+    private bossMeleeDamage = 20;
+    @property({ group: 'BOSS', displayName: '技能' })
+    private bossSkillDamage = 35;
+
+    // ---- 环境伤害 ----
+    @property({ group: '环境伤害', displayName: '浊湮接触/秒' })
+    private corruptionContactDrain = 5;
 
     protected onLoad(): void {
         gameConfig.spirit = {
@@ -406,9 +425,11 @@ export class GameConfig extends Component {
             chaseSpeed: this.enemyChaseSpeed,
             sightRange: this.enemySightRange,
             attackRange: this.enemyAttackRange,
+            verticalTolerance: this.enemyVerticalTolerance,
             attackCooldown: this.enemyAttackCooldown,
             attackStartup: this.enemyAttackStartup,
             attackDuration: this.enemyAttackDuration,
+            hitStunDuration: this.enemyHitStunDuration,
             patrolRange: this.enemyPatrolRange,
             patrolPause: this.enemyPatrolPause,
             discoverDuration: this.enemyDiscoverDuration,

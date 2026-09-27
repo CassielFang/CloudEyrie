@@ -40,6 +40,18 @@ import { MistShot } from './MistShot';
 import { HitSpark } from './HitSpark';
 
 /**
+ * 玩家受击结算结果。
+ * 原先是直接返回数字，但「完美格挡」返回的 0 和「没扣到灵炁」无法区分，
+ * 攻击方分不出该不该反制 —— 故改成结构体。
+ */
+export interface PlayerDamageResult {
+    /** 实际应扣除的灵炁量 */
+    spiritCost: number;
+    /** 是否完美格挡（此时 spiritCost 恒为 0，攻击方应被反制） */
+    perfectBlocked: boolean;
+}
+
+/**
  * 战斗控制器（挂在青禾节点）：独占 J（攻击/蓄力）与 L（格挡）输入，
  * 内聚轻击三连 / 蓄力重击 / 格挡·完美格挡 / 灵雾灵弹，
  * 驱动 AttackHitBox 命中判定并结算伤害与灵炁消耗。
@@ -429,24 +441,26 @@ export class CombatController extends Component {
     // ============ 格挡 / 完美格挡 ============
 
     /**
-     * 敌人命中玩家时调用（后续敌人 AI 接入）。
-     * 返回实际应扣除的灵炁：完美格挡 0、普通格挡减伤后值、未格挡原值。
+     * 敌人命中玩家时调用。
+     * 完美格挡 → spiritCost 为 0 且 perfectBlocked = true；普通格挡 → 减伤后的量；未格挡 → 原值。
+     *
+     * 反制（把攻击者弹开 / 打入硬直）不在这里做 —— 这里拿不到攻击者是谁，
+     * 由调用方（敌人 AI）读 perfectBlocked 自行执行。
      */
-    public receivePlayerDamage(amount: number): number {
+    public receivePlayerDamage(amount: number): PlayerDamageResult {
         const combat = gameConfig.combat;
         if (this.blocking) {
             const isPerfect = this.blockElapsed <= combat.perfectBlockWindow;
             if (isPerfect) {
-                log('[Combat] 完美格挡！反制（0 消耗）');
-                // TODO: 反制击退敌人（待敌人 AI 接入后补充）
-                return 0;
+                log('[Combat] 完美格挡！');
+                return { spiritCost: 0, perfectBlocked: true };
             }
             spiritEnergySystem.consume(gameConfig.spirit.blockCost);
             const reduced = amount * (1 - combat.blockReduction);
             log(`[Combat] 格挡减伤 ${amount} -> ${reduced.toFixed(1)}`);
-            return reduced;
+            return { spiritCost: reduced, perfectBlocked: false };
         }
-        return amount;
+        return { spiritCost: amount, perfectBlocked: false };
     }
 
     // ============ 灵雾灵弹 ============

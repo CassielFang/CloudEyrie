@@ -22,6 +22,13 @@ export class SpiritEnergySystem {
 
     /** 是否处于战斗状态（决定恢复速率档位） */
     private inCombat = false;
+    /**
+     * 当前正在威胁玩家的来源集合（每只敌人 AI 是一个来源）。
+     * 用集合而不是布尔：同屏多只敌人时，一只回巡逻 / 死亡不能把另一只的「战斗中」也抹掉。
+     */
+    private combatSources = new Set<object>();
+    /** 手动覆盖（自测与调试用）：非 null 时优先于 combatSources */
+    private combatOverride: boolean | null = null;
     /** 灵脉潮汐恢复倍率（默认 1，高潮 2、低潮 0.5） */
     private tideRegenMult = 1.0;
     /** 是否站在灵泉范围内 */
@@ -46,8 +53,36 @@ export class SpiritEnergySystem {
         return this.max > 0 ? this.current / this.max : 0;
     }
 
+    /**
+     * 手动设置战斗状态：**会覆盖**所有来源上报的状态（自测 / 调试用）。
+     * 敌人 AI 请用 setCombatSource，不要用这个。
+     */
     public setInCombat(value: boolean): void {
-        this.inCombat = value;
+        this.combatOverride = value;
+        this.refreshInCombat();
+    }
+
+    /**
+     * 上报/撤销一个战斗威胁来源（敌人 AI 用，传 `this` 即可）。
+     * 只要有任意一个来源存在就算战斗中；来源销毁时必须传 false 退订，
+     * 否则会永久停在战斗恢复档。
+     */
+    public setCombatSource(source: object, active: boolean): void {
+        if (active) {
+            this.combatSources.add(source);
+        } else {
+            this.combatSources.delete(source);
+        }
+        this.refreshInCombat();
+    }
+
+    /** 当前战斗来源数量（调试用） */
+    public getCombatSourceCount(): number {
+        return this.combatSources.size;
+    }
+
+    private refreshInCombat(): void {
+        this.inCombat = this.combatOverride ?? this.combatSources.size > 0;
     }
 
     public isInCombat(): boolean {

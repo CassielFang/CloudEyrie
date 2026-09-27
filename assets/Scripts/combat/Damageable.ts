@@ -48,17 +48,26 @@ export class Damageable extends Component {
 
         this.hp -= info.amount;
 
-        // 击退：有刚体则覆盖水平速度（竖直分量保留）
-        if (this.rigidBody && info.knockback.lengthSqr() > 0) {
-            const v = this.rigidBody.linearVelocity;
-            this.rigidBody.linearVelocity = new Vec2(info.knockback.x, v.y);
-        }
-
         log(`[Damageable] ${this.node.name} 受击 ${info.amount}，剩余 ${Math.max(0, this.hp)}/${this.maxHp}`);
 
         if (this.hp <= 0) {
             this.hp = 0;
             this.die();
+            return;
+        }
+
+        // 击退：挂了 onDamaged 的（敌人 AI）自己接管。
+        // 它要的是「整段受击硬直内的位移总量」，而不是这里写死的一次速度覆盖 ——
+        // AI 每帧都会写水平速度，继续在这里写等于白写。
+        if (this.onDamaged) {
+            this.onDamaged(this, info);
+            return;
+        }
+
+        // 未被接管时的默认行为：有刚体则覆盖水平速度（竖直分量保留）
+        if (this.rigidBody && info.knockback.lengthSqr() > 0) {
+            const v = this.rigidBody.linearVelocity;
+            this.rigidBody.linearVelocity = new Vec2(info.knockback.x, v.y);
         }
     }
 
@@ -67,6 +76,12 @@ export class Damageable extends Component {
      * 未设置时维持原行为：立即停用节点。
      */
     public onDeath: ((self: Damageable) => void) | null = null;
+
+    /**
+     * 受击回调（仅在未致死时触发）。挂上后**接管击退**：本组件不再覆写水平速度，
+     * 由接收方自己决定击退曲线。敌人 AI 用它驱动受击硬直（含完美格挡反制）。
+     */
+    public onDamaged: ((self: Damageable, info: DamageInfo) => void) | null = null;
 
     private die(): void {
         eventBus.emit('enemy-died', { node: this.node, name: this.node.name });
