@@ -19,6 +19,15 @@ const ART_NATURAL_FACING: NaturalFacing = 1;
 const PATROL_ARRIVE_EPS = 12;
 /** 追击脱战余量：目标距离超过「视野 × 此倍数」才放弃追击 */
 const CHASE_LEASH_MULT = 1.3;
+/**
+ * 目标脱离后仍继续追击的宽限时长 /秒（水平超脱战余量 或 垂直超容差都算脱离）。
+ *
+ * 有这段宽限，青禾原地起跳 / 小跳不会立刻把小怪甩掉 —— 否则每跳一下它都要重走
+ * 一遍「返回巡逻 → 发现 0.45 秒 → 追击」，看着像失忆，而且玩家反复横跳就能把它
+ * 永久锁在发现动画里。真跳到高处、或跑远超过这个时间才放弃。
+ * 设为 0 就是「一跳就脱战」。
+ */
+const CHASE_LOST_TARGET_DURATION = 1.2;
 /** 攻击命中允许的目标位移余量（攻击范围 × 此倍数） */
 const ATTACK_REACH_MULT = 1.25;
 /** 受击闪色持续时间 /秒 */
@@ -87,6 +96,8 @@ export class EnemyAI extends Component {
 
     // 发现
     private discoverRemaining = 0;
+    /** 目标脱离视野的累计时长（水平超脱战余量 或 垂直超容差），到阈值就放弃追击 */
+    private lostTargetRemaining = 0;
 
     // 攻击
     private attackElapsed = 0;
@@ -198,7 +209,7 @@ export class EnemyAI extends Component {
                 this.updateDiscover(dt, dirX);
                 break;
             case EnemyState.Chase:
-                this.updateChase(dirX);
+                this.updateChase(dt, dirX);
                 break;
             case EnemyState.Attack:
                 this.updateAttack(dt, dirX);
@@ -260,11 +271,12 @@ export class EnemyAI extends Component {
         }
     }
 
-    private updateChase(dirX: number): void {
+    private updateChase(dt: number, dirX: number): void {
         const config = gameConfig.enemy;
         this.facing = dirX;
 
         if (this.isTargetInAttackRange()) {
+            this.lostTargetRemaining = 0;
             if (this.cooldownRemaining <= 0) {
                 this.enterAttack();
             } else {
@@ -274,13 +286,21 @@ export class EnemyAI extends Component {
             return;
         }
 
-        // 脱战只看水平距离：青禾跳到头顶上属于「暂时够不着」，
-        // 不该让它直接放弃追击 —— 小怪又不会飞，落下来就接着打
-        if (this.horizontalDistanceToTarget() > config.sightRange * CHASE_LEASH_MULT) {
-            this.enterPatrol();
+        // 目标脱离：水平超脱战余量，或垂直超容差（青禾跳起来了 / 上了高台）。
+        // 两种都算「暂时够不着」——小怪不会飞，贴到玩家正下方既追不上、看着也傻。
+        const outOfLeash = this.horizontalDistanceToTarget() > config.sightRange * CHASE_LEASH_MULT;
+        const outOfLevel = this.verticalOffsetToTarget() > config.verticalTolerance;
+        if (outOfLeash || outOfLevel) {
+            this.lostTargetRemaining += dt;
+            this.setVelocityX(0);
+            if (this.lostTargetRemaining >= CHASE_LOST_TARGET_DURATION) {
+                this.enterPatrol();
+            }
             return;
         }
 
+        // 重新够得着：清零计时，继续追
+        this.lostTargetRemaining = 0;
         this.setVelocityX(dirX * config.chaseSpeed);
     }
 
@@ -364,6 +384,8 @@ export class EnemyAI extends Component {
         this.pickPatrolTarget();
         // 主动补一次停留计时：从追击切回来时若不设，会立刻往下走、白瞎「停留」参数
         this.patrolPauseRemaining = gameConfig.enemy.patrolPause;
+        // 脱战计时归零，下一轮仇恨重新起算
+        this.lostTargetRemaining = 0;
         log(`[EnemyAI] ${this.node.name} 返回巡逻`);
     }
 
