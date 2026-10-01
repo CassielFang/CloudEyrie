@@ -13,9 +13,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **没有 CLI 构建 / lint / 测试命令**。`package.json` 无 scripts，仓库内无测试。代码通过 Cocos Creator 3.8.8 编辑器打开、预览与构建。
 - 改 `.ts` 脚本后由编辑器自动编译；改 `.scene` / `.prefab` 只能在编辑器里操作（或按 Cocos 序列化格式手改，风险高，通常不推荐）。
 - `*.meta` 文件由编辑器自动生成并维护（记录资源 UUID 与导入配置），**不要手改或删除**。
-- 唯一的场景是 `assets/Scene/main.scene`，内含一个常驻 `GameManager` 节点（`director.addPersistRootNode`）和一个 `Canvas`。
+- 两个场景：`assets/Scene/Title.scene`（游戏首页）→ 点「开始游戏」→ `assets/Scene/main.scene`（关卡）。
+  main.scene 内含一个常驻 `GameManager` 节点（`director.addPersistRootNode`）和一个 `Canvas`；**Title.scene 故意不放 GameManager**
+  （`GameManager.instance` 是进程内静态单例，两边都放会让 main 的副本自杀、且 GameConfig 的 Inspector 值取自先加载的那个）。
 - ⚠️ **预览运行时无法保存场景**：`Ctrl+S` 会"看起来成功"但文件根本不写。必须先**停止预览**再保存，然后重新运行预览。
-  （改 `.ts` 后也**必须重启预览**才生效——编辑器会自动重编译，但运行中的预览不热重载。）
+  （改 `.ts` 后也**必须重启预览**才生效——编辑器会自动重编译，但运行中的预览不热重载。
+  另外编辑器重编译有延迟，改完 `.ts` 立刻重启预览会跑的还是旧代码，必要时 `refresh_assets` 后等几秒。）
+- ⚠️ **启动场景不随仓库走**：预览的启动场景存在 `profiles/v2/packages/preview.json`，而 `profiles/` 被 `.gitignore` 忽略
+  ——**每台机器要各自在「预览」面板里把 Start Scene 选成 Title**。构建时的场景列表同理，只能在「构建发布」面板里勾选排序。
 - 灰盒占位素材在 `assets/Textures/placeholder/`；其中 `white` / `mist_shot` / `hit_spark` 三张在
   `assets/resources/` 下有副本（只有 `resources/` 下的资源能被 `resources.load` 运行时加载）——**改图要两边一起改**。
 
@@ -58,8 +63,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   `Static` 的 fixture 不跟随节点移动；`Dynamic` 会休眠而休眠后 Box2D 不评估接触。
   两者都会导致**攻击"时灵时不灵"**。
 
-### `ui/` —— 灰盒调试 UI（临时）
+### `ui/` —— 界面
 
+- `TitleScreen.ts`：首页（`assets/Scene/Title.scene` 的唯一组件）。背景暗角 / 标题 / 菜单 / 灵炁光点 / 子面板调度全在这里，
+  版式常量集中在文件顶部。三段状态机：`Prompt`（按任意键继续）→ `Menu`（五项竖排）→ `Panel`（子面板打开）。
+- `TitleSubPanels.ts`：首页的设置 / 成就 / 制作组三个面板，**普通工具类**（非 Component），由 TitleScreen new 出来。
+  三个面板目前都是**占位**——音频系统、成就系统、存档系统都还没写。
+  ⚠️ 制作组名单在 `CREDITS` 常量里，是 `（待填）`，等真实分工。
+  面板贴图（宣纸九宫格 / 卷轴）在场景里以**隐藏模板节点**的形式存在，代码克隆出来用——
+  它们不在 `resources/` 下，没法 `resources.load`。
 - `DebugHud.ts`：左上角调试 HUD，显示**灵炁条 / 当前形态 / 敌人血量**这三样测试中最"看不见"的数据。
   整个 UI 在 `onLoad` 里用代码搭（挂到 `Canvas/DebugHud` 即可，无需在 Inspector 连引用），
   血条底图从 `assets/resources/white.png` 运行时加载。**正式 UI 做好后整个文件删掉。**
@@ -84,6 +96,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - Commit message 格式：`<type>: <内容>`，type 用 `feat` / `fix` / `docs` / `refactor` / `perf` / `chore` 等常规前缀。
 - 流程：开发前 `git pull --rebase origin main` → 多次 commit → 推送前再次 `git pull --rebase origin main` → `git push origin main`。
+
+### 文字与字体
+
+- 游戏字体是 `assets/resources/font.ttf`（`chengrongguangke`，毛笔行楷），运行时用 `resources.load('font', Font)` 挂到 `Label.font`。
+- ⚠️ **这份字体缺少「炁」(U+7081)** —— 游戏的核心名词「灵炁」用它会掉字。
+  首页文案已避开该字；**写任何要挂这个字体的 UI 文案前先确认没有「炁」**，否则得改用系统字体或换字体文件。
 
 ### 编码风格（见 `.editorconfig`）
 

@@ -2,7 +2,6 @@ import {
     _decorator, Component, Node, Vec2, Vec3, Size, Color,
     BoxCollider2D, RigidBody2D, IPhysics2DContact, Contact2DType,
     Prefab, Graphics, Sprite, SpriteFrame, UITransform, Layers, resources, instantiate,
-    Input, EventKeyboard, KeyCode, input,
     log,
 } from 'cc';
 const { ccclass, property } = _decorator;
@@ -27,6 +26,8 @@ const MIST_SHOT_BODY = 18;
 const HIT_SPARK_SIZE = 56;
 
 import { eventBus } from '../core/EventBus';
+import { GameAction } from '../core/InputActions';
+import { inputSystem } from '../core/InputSystem';
 import { applyFacingFlip, NaturalFacing } from '../core/FacingFlip';
 
 /** 光刃素材本身画的是「弧口朝左、弧背鼓向右」—— 即天然朝右 */
@@ -183,9 +184,6 @@ export class CombatController extends Component {
             this.shieldNode.active = false;
         }
 
-        input.on(Input.EventType.KEY_DOWN, this.onKeyDown, this);
-        input.on(Input.EventType.KEY_UP, this.onKeyUp, this);
-
         eventBus.on<CompanionFormChangedEvent>('companion-form-changed', this.onFormChangedHandler);
 
         // 预加载灰盒特效素材（只有 assets/resources 下的资源能运行时加载）
@@ -207,14 +205,47 @@ export class CombatController extends Component {
             this.attackHitBox.off(Contact2DType.END_CONTACT, this.onAttackEndContact, this);
         }
         this.overlapping.clear();
-        input.off(Input.EventType.KEY_DOWN, this.onKeyDown, this);
-        input.off(Input.EventType.KEY_UP, this.onKeyUp, this);
         eventBus.off<CompanionFormChangedEvent>('companion-form-changed', this.onFormChangedHandler);
     }
 
     /** 每帧由 QingheController 驱动（先于形态移动，避免门控延迟一帧） */
     public tick(dt: number, ctx: FormContext): void {
         this.ctx = ctx;
+
+        // ⚠️ **按键边沿必须在这里、早于下面任何计时积分处理。**
+        //
+        // 迁移前 onKeyDown/onKeyUp 是在**事件回调里**直接改状态的，那发生在两帧之间；
+        // 若把边沿拖到 chargeTime 积分与 updateAttackTiming 之后处理，会有两处偏移：
+        //   1) 松手时 chargeTime 比原来多算一个 dt —— lightTapThreshold 只有 0.2s，
+        //      阈值漂移约 8%，快速点按更容易被误判成蓄力重击；
+        //   2) beginAttack() 被推迟到 updateAttackTiming 之后 —— attackTimer 当帧不再推进，
+        //      每段攻击（含三段连击）都固定多一帧前摇。attackStartup = 0.1s，等于 +16.7%，
+        //      连段节奏肉眼可感地变慢。
+        // 放在最顶端就可以和「事件里立刻处理」的时序逐位对齐。
+        //
+        // ⚠️ attackHeld / blockHeld 必须由 wasPressed/wasReleased 这对**边沿**维护，
+        // **不能写成 `= inputSystem.isDown(...)`**：极快的点按可能「按下+松开」都发生在
+        // 同一帧间隙里，采样到的 isDown 会是 false，这次点按就被整个吞掉了。
+        if (inputSystem.wasPressed(GameAction.Attack)) {
+            this.attackHeld = true;
+            this.chargeTime = 0;
+            if (this.currentForm === CompanionForm.Mist) {
+                this.fireMistShot();
+            }
+        }
+        if (inputSystem.wasReleased(GameAction.Attack)) {
+            this.attackHeld = false;
+            if (this.currentForm === CompanionForm.Entity) {
+                this.resolveAttackRelease();
+            }
+        }
+        if (inputSystem.wasPressed(GameAction.Block)) {
+            this.blockHeld = true;
+            this.blockElapsed = 0;
+        }
+        if (inputSystem.wasReleased(GameAction.Block)) {
+            this.blockHeld = false;
+        }
 
         // 蓄力计时（实体形态按住 J）
         if (this.attackHeld && this.currentForm === CompanionForm.Entity) {
@@ -246,47 +277,6 @@ export class CombatController extends Component {
     }
 
     // ============ 输入 ============
-
-    private onKeyDown(event: EventKeyboard): void {
-        switch (event.keyCode) {
-            case KeyCode.KEY_J:
-                if (this.attackHeld) {
-                    return;
-                }
-                this.attackHeld = true;
-                this.chargeTime = 0;
-                if (this.currentForm === CompanionForm.Mist) {
-                    this.fireMistShot();
-                }
-                break;
-            case KeyCode.KEY_L:
-                if (this.blockHeld) {
-                    return;
-                }
-                this.blockHeld = true;
-                this.blockElapsed = 0;
-                break;
-            default: break;
-        }
-    }
-
-    private onKeyUp(event: EventKeyboard): void {
-        switch (event.keyCode) {
-            case KeyCode.KEY_J:
-                if (!this.attackHeld) {
-                    return;
-                }
-                this.attackHeld = false;
-                if (this.currentForm === CompanionForm.Entity) {
-                    this.resolveAttackRelease();
-                }
-                break;
-            case KeyCode.KEY_L:
-                this.blockHeld = false;
-                break;
-            default: break;
-        }
-    }
 
     private resolveAttackRelease(): void {
         const isLight = this.chargeTime < gameConfig.combat.lightTapThreshold;

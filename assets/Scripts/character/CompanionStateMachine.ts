@@ -1,7 +1,9 @@
-import { _decorator, Component, Input, input, EventKeyboard, KeyCode, log } from 'cc';
+import { _decorator, Component, log } from 'cc';
 const { ccclass } = _decorator;
 
 import { eventBus } from '../core/EventBus';
+import { GameAction } from '../core/InputActions';
+import { inputSystem } from '../core/InputSystem';
 import { spiritEnergySystem } from '../core/SpiritEnergySystem';
 import { gameConfig } from '../core/GameConfig';
 import { CompanionForm, FormContext, ICompanionForm } from './forms/ICompanionForm';
@@ -49,12 +51,33 @@ export class CompanionStateMachine extends Component {
         this.states.set(CompanionForm.Mist, new MistForm());
         this.states.set(CompanionForm.Merge, new MergeForm());
         this.currentState = this.states.get(CompanionForm.Entity)!;
-
-        input.on(Input.EventType.KEY_DOWN, this.onKeyDown, this);
     }
 
-    protected onDestroy(): void {
-        input.off(Input.EventType.KEY_DOWN, this.onKeyDown, this);
+    /**
+     * 形态切换的按键读取。
+     *
+     * 由 `QingheController.update` 每帧驱动 —— 动作层没有「事件回调」这种入口，
+     * 边沿要在帧内轮询（`wasPressed` 只在按下的那一帧为 true，锁存在 END_FRAME 清）。
+     */
+    private pollSwitchKeys(): void {
+        if (inputSystem.wasPressed(GameAction.FormSwitch)) {
+            // 实体 ↔ 灵雾
+            if (this.form === CompanionForm.Entity) {
+                this.trySwitchTo(CompanionForm.Mist);
+            }
+            else if (this.form === CompanionForm.Mist) {
+                this.trySwitchTo(CompanionForm.Entity);
+            }
+        }
+        if (inputSystem.wasPressed(GameAction.FormMerge)) {
+            // 灵雾 → 灵合；灵合 → 实体
+            if (this.form === CompanionForm.Mist) {
+                this.trySwitchTo(CompanionForm.Merge);
+            }
+            else if (this.form === CompanionForm.Merge) {
+                this.trySwitchTo(CompanionForm.Entity);
+            }
+        }
     }
 
     public getCurrentForm(): CompanionForm {
@@ -75,6 +98,9 @@ export class CompanionStateMachine extends Component {
      * 计时器衰减 + 移动 + 持续消耗 + 强制切雾
      */
     public tick(dt: number, ctx: FormContext): void {
+        // 切换键先读：它走的是形态机自己的硬直/冷却，和下面的移动是两码事
+        this.pollSwitchKeys();
+
         this.switchLockRemaining = Math.max(0, this.switchLockRemaining - dt);
         this.mergeCooldownRemaining = Math.max(0, this.mergeCooldownRemaining - dt);
         this.mergeSleepRemaining = Math.max(0, this.mergeSleepRemaining - dt);
@@ -179,31 +205,6 @@ export class CompanionStateMachine extends Component {
         }
     }
 
-    private onKeyDown(event: EventKeyboard): void {
-        // DEBUG 临时按键，后续迁移到 CharacterInput
-        switch (event.keyCode) {
-            case KeyCode.KEY_F:
-                // 实体 ↔ 灵雾
-                if (this.form === CompanionForm.Entity) {
-                    this.trySwitchTo(CompanionForm.Mist);
-                }
-                else if (this.form === CompanionForm.Mist) {
-                    this.trySwitchTo(CompanionForm.Entity);
-                }
-                break;
-            case KeyCode.KEY_G:
-                // 灵雾 → 灵合；灵合 → 实体
-                if (this.form === CompanionForm.Mist) {
-                    this.trySwitchTo(CompanionForm.Merge);
-                }
-                else if (this.form === CompanionForm.Merge) {
-                    this.trySwitchTo(CompanionForm.Entity);
-                }
-                break;
-            default:
-                break;
-        }
-    }
 
     private checkForcedMist(): void {
         if (this.form === CompanionForm.Mist) {

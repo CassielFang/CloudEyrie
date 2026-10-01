@@ -2,7 +2,6 @@ import {
     _decorator,
     Component, Node,
     RigidBody2D, BoxCollider2D, IPhysics2DContact, Contact2DType,
-    Input, EventKeyboard, KeyCode, input,
     Vec2, Color, Sprite,
     log
 } from 'cc';
@@ -10,6 +9,8 @@ const { ccclass, property } = _decorator;
 
 import { eventBus } from '../core/EventBus';
 import { applyFacingFlip, NaturalFacing } from '../core/FacingFlip';
+import { GameAction } from '../core/InputActions';
+import { inputSystem } from '../core/InputSystem';
 
 /**
  * 青禾立绘的天然朝向：素材画的是**朝右**。
@@ -88,56 +89,6 @@ export class QingheController extends Component {
                 this.ctx.grounded = false;
             }
             log('[Qinghe Controller] off ground');
-        }
-    }
-
-    private onKeyDown(event: EventKeyboard): void {
-        if (!this.ctx) {
-            return;
-        }
-        const input = this.ctx.input;
-        switch (event.keyCode) {
-            case KeyCode.KEY_A: case KeyCode.ARROW_LEFT:
-                input.left = true;
-                break;
-            case KeyCode.KEY_D: case KeyCode.ARROW_RIGHT:
-                input.right = true;
-                break;
-            case KeyCode.KEY_W: case KeyCode.ARROW_UP:
-                input.up = true;
-                break;
-            case KeyCode.KEY_S: case KeyCode.ARROW_DOWN:
-                input.down = true;
-                break;
-            case KeyCode.SPACE:
-                input.jump = true;
-                break;
-            case KeyCode.KEY_K:
-                input.dash = true;
-                break;
-            default: break;
-        }
-    }
-
-    private onKeyUp(event: EventKeyboard): void {
-        if (!this.ctx) {
-            return;
-        }
-        const input = this.ctx.input;
-        switch (event.keyCode) {
-            case KeyCode.KEY_A: case KeyCode.ARROW_LEFT:
-                input.left = false;
-                break;
-            case KeyCode.KEY_D: case KeyCode.ARROW_RIGHT:
-                input.right = false;
-                break;
-            case KeyCode.KEY_W: case KeyCode.ARROW_UP:
-                input.up = false;
-                break;
-            case KeyCode.KEY_S: case KeyCode.ARROW_DOWN:
-                input.down = false;
-                break;
-            default: break;
         }
     }
 
@@ -225,8 +176,8 @@ export class QingheController extends Component {
         this.collider.on(Contact2DType.BEGIN_CONTACT, this.onBeginContact, this);
         this.collider.on(Contact2DType.END_CONTACT, this.onEndContact, this);
 
-        input.on(Input.EventType.KEY_DOWN, this.onKeyDown, this);
-        input.on(Input.EventType.KEY_UP, this.onKeyUp, this);
+        // 输入不再在这里监听：统一走 core/InputSystem 的动作层，
+        // 每帧在 update 开头把快照重填一遍（见 update 里的注释）。
 
         // 形态状态机 + 战斗控制器（同节点）
         this.companionStateMachine = this.getComponent(CompanionStateMachine);
@@ -242,9 +193,6 @@ export class QingheController extends Component {
         this.collider.off(Contact2DType.BEGIN_CONTACT, this.onBeginContact, this);
         this.collider.off(Contact2DType.END_CONTACT, this.onEndContact, this);
 
-        input.off(Input.EventType.KEY_DOWN, this.onKeyDown, this);
-        input.off(Input.EventType.KEY_UP, this.onKeyUp, this);
-
         eventBus.off<CompanionFormChangedEvent>('companion-form-changed', this.onFormChangedHandler);
     }
 
@@ -259,6 +207,24 @@ export class QingheController extends Component {
             return;
         }
 
+        // ⚠️ 快照必须在**这里、最顶端、无条件**重填，而且**不能只在事件里写**。
+        //
+        // 这是全项目唯一读 inputSystem 的地方（见 InputSystem.ts 文件头的硬规矩 3），
+        // 形态状态类与战斗控制器一律读 ctx.input。
+        //
+        // 为什么每帧重填能顶替原来「消费后在 update 末尾手动清 jump/dash」那两行：
+        // wasPressed 只在按下的那一帧为 true（锁存在 END_FRAME 清），所以快照天然
+        // 只有一帧有效。原来那两行注释担心的「在地面按 K，等下次跳起来时突然触发」
+        // 之所以会发生，是因为旧写法的事件锁存会一直挂着 —— 每帧重填之后不存在
+        // 挂着的可能。**若把这段挪到 update 末尾，就必须把那两行清位加回来。**
+        const inp = this.ctx.input;
+        inp.left = inputSystem.isDown(GameAction.MoveLeft);
+        inp.right = inputSystem.isDown(GameAction.MoveRight);
+        inp.up = inputSystem.isDown(GameAction.MoveUp);
+        inp.down = inputSystem.isDown(GameAction.MoveDown);
+        inp.jump = inputSystem.wasPressed(GameAction.Jump);
+        inp.dash = inputSystem.wasPressed(GameAction.Dash);
+
         // 战斗先更新（写 isAttacking/isBlocking），再委托形态移动读门控
         if (this.combat) {
             this.combat.tick(dt, this.ctx);
@@ -269,11 +235,5 @@ export class QingheController extends Component {
 
         // 朝向：水平翻转立绘（美术目前只有单侧朝向，先这样表示左右）
         applyFacingFlip(this.artNode, this.ctx.facing, ART_NATURAL_FACING);
-
-        // 边沿锁存只保留一帧：jump/dash 是「消费后清零」的边沿输入，
-        // 若本帧条件不满足就没被消费，必须在此丢弃。
-        // 否则在地面按 K（踏云闪要求已起跳）会一直挂着，等下次跳起来时突然触发。
-        this.ctx.input.jump = false;
-        this.ctx.input.dash = false;
     }
 }

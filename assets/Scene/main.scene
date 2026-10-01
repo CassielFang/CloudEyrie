@@ -55,7 +55,7 @@
     },
     "autoReleaseAssets": false,
     "_globals": {
-      "__id__": 51
+      "__id__": 52
     },
     "_id": "b7e0a500-ae39-4c01-a49b-9c55e9746b14"
   },
@@ -135,49 +135,62 @@
     "regenInCombat": 1,
     "springRestoreRate": 30,
     "springRestoreCapRatio": 1,
+    "tidePeriod": 120,
+    "highTideRegenMult": 2,
+    "lowTideRegenMult": 0.5,
+    "highTideEnemyActivityMult": 1.2,
+    "switchLockDuration": 0.5,
+    "forcedMistThreshold": 10,
     "switchEntityToMist": 10,
     "switchMistToEntity": 5,
+    "mistBaseDrain": 3,
+    "mistFlyDrainExtra": 2,
+    "mistPassObstacleCost": 20,
     "switchMistToMerge": 30,
     "mergeMinSpirit": 50,
     "switchMergeToEntity": 15,
     "switchMergeToMist": 10,
-    "forcedMistThreshold": 10,
-    "switchLockDuration": 0.5,
-    "lightAttackCost": 8,
-    "heavyAttackCost": 15,
-    "cloudDashCost": 12,
-    "mistShotCost": 5,
     "mergePurifyCostPerSec": 20,
     "mergeBurstCost": 30,
-    "blockCost": 10,
-    "mistBaseDrain": 3,
-    "mistFlyDrainExtra": 2,
-    "mistPassObstacleCost": 20,
-    "enemyYangMeleeDamage": 15,
-    "enemyYinRangedDamage": 10,
-    "bossMeleeDamage": 20,
-    "bossSkillDamage": 35,
-    "corruptionContactDrain": 5,
     "mergeCooldown": 20,
     "mergeSleepDuration": 10,
+    "lightAttackCost": 8,
     "baseLightDamage": 15,
     "comboKnockback": 1.5,
     "comboWindow": 0.3,
+    "heavyAttackCost": 15,
     "lightTapThreshold": 0.2,
     "heavyChargeTime": 1,
     "heavyFullDamageMult": 2.5,
     "heavyHalfDamageMult": 1.5,
     "heavyKnockback": 3,
+    "blockCost": 10,
     "blockReduction": 0.7,
     "perfectBlockWindow": 0.2,
+    "cloudDashCost": 12,
+    "mistShotCost": 5,
     "mistShotDamageRatio": 0.6,
     "mistShotKnockback": 0.15,
     "mistShotSpeed": 10,
     "mistShotLifetime": 2,
-    "tidePeriod": 120,
-    "highTideRegenMult": 2,
-    "highTideEnemyActivityMult": 1.2,
-    "lowTideRegenMult": 0.5,
+    "enemyPatrolSpeed": 1.2,
+    "enemyChaseSpeed": 2,
+    "enemyPatrolRange": 200,
+    "enemyPatrolPause": 0.8,
+    "enemySightRange": 170,
+    "enemyVerticalTolerance": 70,
+    "enemyDiscoverDuration": 0.45,
+    "enemyAttackRange": 85,
+    "enemyAttackStartup": 0.3,
+    "enemyAttackDuration": 0.55,
+    "enemyAttackCooldown": 1.2,
+    "enemyYangMeleeDamage": 15,
+    "enemyYinRangedDamage": 10,
+    "enemyHitStunDuration": 0.3,
+    "enemyDeathDuration": 0.5,
+    "bossMeleeDamage": 20,
+    "bossSkillDamage": 35,
+    "corruptionContactDrain": 5,
     "_id": "81zagBV0ZD5YRzaU3iUYNT"
   },
   {
@@ -208,19 +221,19 @@
         "__id__": 37
       },
       {
-        "__id__": 45
+        "__id__": 46
       }
     ],
     "_active": true,
     "_components": [
       {
-        "__id__": 48
-      },
-      {
         "__id__": 49
       },
       {
         "__id__": 50
+      },
+      {
+        "__id__": 51
       }
     ],
     "_prefab": null,
@@ -530,7 +543,7 @@
     "_priority": 0,
     "_fov": 45,
     "_fovAxis": 0,
-    "_orthoHeight": 462.1359223300971,
+    "_orthoHeight": 392.9824561403509,
     "_near": 0,
     "_far": 2000,
     "_color": {
@@ -1382,7 +1395,7 @@
         "__id__": 44
       },
       {
-        "__id__": 60
+        "__id__": 45
       }
     ],
     "_prefab": null,
@@ -1616,6 +1629,18 @@
     "_id": "2dHqyf1llBnL/cYht+80du"
   },
   {
+    "__type__": "131209pZ2NIg6gXK1sLB7HT",
+    "_name": "",
+    "_objFlags": 0,
+    "__editorExtras__": {},
+    "node": {
+      "__id__": 37
+    },
+    "_enabled": true,
+    "__prefab": null,
+    "_id": "98UGJcpPfZtRkXDcOQmYJA"
+  },
+  {
     "__type__": "cc.Node",
     "_name": "DebugHud",
     "_objFlags": 0,
@@ -1627,10 +1652,10 @@
     "_active": true,
     "_components": [
       {
-        "__id__": 46
+        "__id__": 47
       },
       {
-        "__id__": 47
+        "__id__": 48
       }
     ],
     "_prefab": null,
@@ -1669,7 +1694,7 @@
     "_objFlags": 0,
     "__editorExtras__": {},
     "node": {
-      "__id__": 45
+      "__id__": 46
     },
     "_enabled": true,
     "__prefab": null,
@@ -1681,7 +1706,7 @@
     "_objFlags": 0,
     "__editorExtras__": {},
     "node": {
-      "__id__": 45
+      "__id__": 46
     },
     "_enabled": true,
     "__prefab": null,
@@ -1768,28 +1793,28 @@
   {
     "__type__": "cc.SceneGlobals",
     "ambient": {
-      "__id__": 52
-    },
-    "shadows": {
       "__id__": 53
     },
-    "_skybox": {
+    "shadows": {
       "__id__": 54
     },
-    "fog": {
+    "_skybox": {
       "__id__": 55
     },
-    "octree": {
+    "fog": {
       "__id__": 56
     },
-    "skin": {
+    "octree": {
       "__id__": 57
     },
-    "lightProbeInfo": {
+    "skin": {
       "__id__": 58
     },
-    "postSettings": {
+    "lightProbeInfo": {
       "__id__": 59
+    },
+    "postSettings": {
+      "__id__": 60
     },
     "bakedWithStationaryMainLight": false,
     "bakedWithHighpLightmap": false
@@ -1940,17 +1965,5 @@
   {
     "__type__": "cc.PostSettingsInfo",
     "_toneMappingType": 0
-  },
-  {
-    "__type__": "131209pZ2NIg6gXK1sLB7HT",
-    "_name": "",
-    "_objFlags": 0,
-    "__editorExtras__": {},
-    "node": {
-      "__id__": 37
-    },
-    "_enabled": true,
-    "__prefab": null,
-    "_id": "98UGJcpPfZtRkXDcOQmYJA"
   }
 ]

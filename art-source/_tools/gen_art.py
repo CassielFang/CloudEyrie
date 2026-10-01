@@ -35,6 +35,7 @@ import gen_ui                 # noqa: E402
 import gen_scene              # noqa: E402
 import gen_fx                 # noqa: E402
 import gen_char               # noqa: E402
+import gen_title              # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)                       # art-source/
@@ -44,6 +45,8 @@ MODULES = {
     "scene": (gen_scene, 3000),
     "fx": (gen_fx, 4000),
     "char": (gen_char, 2000),
+    # title 不是整批随机生成的，seed 对它无效（三张图都是解析式的）
+    "title": (gen_title, 5000),
 }
 
 

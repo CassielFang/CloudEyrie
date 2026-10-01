@@ -63,6 +63,20 @@ Python 脚本画出来，不是美术组画的。
 
 ## 目录与尺寸
 
+### `title/` —— 首页专用（3 张）
+
+给 `assets/Scene/Title.scene` 用的，`python gen_art.py --only title` 生成。
+和别的类别不同，这三张**不是整批随机生成的**（都是解析式的），所以 `--seed` 对它们无效。
+
+| 文件 | 尺寸 | 说明 |
+|---|---|---|
+| `title_scroll.png` | 2200×1000 | 从 `assets/Textures/scroll.png`（4000×1000）居中裁的中段。留了左右余量给超宽屏按 cover 铺满 |
+| `title_vignette.png` | 512×512 | 径向暗角，压四边收视线。引擎里拉伸到可视区尺寸 |
+| `title_glow.png` | 256×256 | 径向柔光（导入后会被裁到 242×242）。一图三用：标题辉光 / 选中项辉光 / 灵炁光点 |
+
+**暮色压暗不在生成器里做**——是在引擎里给 `Sprite.color` 乘一个深青靛蓝（见 `TitleScreen.ts` 的 `BG_TINT`）。
+乘算保留笔触和明暗层次，比叠半透明黑蒙层通透；放在引擎里也方便调色，不用重跑生成器。
+
 ### `ui/` —— 界面（15 张）
 
 | 文件 | 尺寸 | 说明 |
@@ -206,5 +220,6 @@ python gen_art.py --sheet ui         # 额外出联系表到 art-source/_preview
 | `gen_scene.py` | 场景资产生成器 |
 | `gen_fx.py` | 特效素材生成器 |
 | `gen_char.py` | 角色与敌人 sprite 生成器 |
+| `gen_title.py` | 首页素材生成器（裁长卷中段 + 两张程序化贴图） |
 | `gen_art.py` | 命令行入口 |
 | `_preview/` | 联系表（校对用，可随时删） |
