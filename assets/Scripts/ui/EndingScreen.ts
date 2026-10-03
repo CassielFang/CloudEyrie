@@ -1,6 +1,7 @@
 import {
     _decorator, Node, Sprite, UITransform, UIOpacity, game,
 } from 'cc';
+import { EDITOR } from 'cc/env';
 const { ccclass } = _decorator;
 
 import { COLOR_GLOW, COLOR_SUB, COLOR_TITLE, ScreenStage } from './ScreenStage';
@@ -9,17 +10,23 @@ import { COLOR_GLOW, COLOR_SUB, COLOR_TITLE, ScreenStage } from './ScreenStage';
  * 结束页（`assets/Scene/Ending.scene` 的唯一组件）。
  *
  * 首页的「退出」不是直接掐进程，而是切到这一页再退 —— 切场景会把首页和关卡的
- * 资源、正在跑的 AI 与物理全部卸干净，`game.end()` 落在一个空场景里执行，
+ * 资源、正在跑的 AI 与物理全部卸干净，退出动作落在一个空场景里执行，
  * 不会在游戏逻辑还在跑的时候把进程掐掉。
  *
  * 背景、暗角、光点、字体这些和首页一样，都由基类 `ScreenStage` 提供。
  *
- * ⚠️ 这里**只调 `game.end()`，不做任何平台判断，也不再响应任何输入**。
- * 别再往这里加 `window.close()` 之类的"网页端补偿"：真实浏览器里它只对
- * 脚本打开的标签页有效（加了也是白加），而编辑器预览的 Game View 是 Electron
- * `<webview>`，`close()` 会把预览视图真的销毁、编辑器预览卡死只能强制重启。
- * 实测踩过两次，`cc/env` 的 `PREVIEW` 常量也挡不住（预览 target 里它是 false）。
+ * ⚠️ 退出**延迟两秒**（见 `HOLD_SECONDS`），这里是唯一一处退出调用。
+ * 别再往这里加 `window.close()`，那和 `game.end()` 是同一条路（见 `quitGame` 的说明），
+ * 加了只会多一次「编辑器里把预览搞死」的机会。
  */
+
+/**
+ * 结束页停留多久再退。
+ *
+ * **不能立刻退** —— 立刻退的话这一页一闪就没了，玩家根本看不到「感谢游玩」。
+ * 留两秒也给标题的淡入留出时间。
+ */
+const HOLD_SECONDS = 2;
 
 @ccclass('EndingScreen')
 export class EndingScreen extends ScreenStage {
@@ -37,8 +44,28 @@ export class EndingScreen extends ScreenStage {
         this.buildWisps(this.wispLayer);
         this.loadFont();
 
-        // game.end();
+        this.scheduleOnce(this.quitGame, HOLD_SECONDS);
     }
+
+    /**
+     * 退出游戏。
+     *
+     * Web 上 `game.end()` 的链路是 `systemInfo.close()` → `game._onClose()` →
+     * `systemInfo.exit()` → **`window.close()`**（`cocos/game/game.ts:648` 与 `:1114`）。
+     * 浏览器只允许关掉「由脚本打开的窗口」，玩家自己敲网址打开的标签页关不掉 ——
+     * 所以这一页还留着「可以直接关闭」那行提示兜底。
+     *
+     * ⚠️ **编辑器里必须跳过**。Game View 跑的是 **editor target**（`EDITOR` 为真），
+     * 在它的 Electron `<webview>` 里 `close()` 会把预览视图真的销毁 → 编辑器预览卡死、
+     * 只能强制重启（实测踩过两次）。**拿 `PREVIEW` 挡不住**：Game View 走 editor target，
+     * 那里 `PREVIEW` 是 false，只有 `EDITOR` 是对的。
+     */
+    private quitGame = (): void => {
+        if (EDITOR) {
+            return;
+        }
+        game.end();
+    };
 
     // ============================================================ 搭建
 

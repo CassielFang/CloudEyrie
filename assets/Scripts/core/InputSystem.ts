@@ -52,6 +52,8 @@ import {
  *   部分平台只在变化时发事件、长按状态会失真，别沿用按键这条边沿路径。
  * - **鼠标（未实现）**：UI 派发器 priority 高于全局（`input.ts:342`），鼠标绑定会比
  *   `Node.EventType.MOUSE_DOWN` 晚触发，UI 按钮可能「既被 UI 处理、又被动作层触发」。
+ * - **捕获模式（设置页改键用）**：见 `setCaptureMode`。它是唯一一个会让**整个动作层
+ *   停止记录按键**的状态，用完必须退出，否则游戏里所有按键都会没反应。
  */
 
 export class InputSystem {
@@ -71,6 +73,18 @@ export class InputSystem {
 
     /** 自检开关。排查键位问题时手动置 true */
     private static readonly DEBUG_VALIDATE = true;
+
+    /**
+     * 捕获模式（设置页改键用）。开启期间**动作层停止记录任何按键**。
+     *
+     * 为什么必须挡住：玩家为了把「跳跃」改成 K 而按下的那个 K，如果照记不误，
+     * 同一帧就会被解析成「踏云闪」——「改键的那一下同时触发了另一个动作」。
+     * （`docs/设置页接口.md` 第 2 节记着这个坑。）
+     *
+     * ⚠️ **用完必须 `setCaptureMode(false)`**。开着的时候 `keysDown` 永远是空的，
+     * 等于整个动作层哑掉；关闭设置面板却忘了退出捕获，表现就是「游戏里按键全没反应」。
+     */
+    private capturing = false;
 
     constructor() {
         this.bindings = gameSettings.getAllBindings();
@@ -191,6 +205,10 @@ export class InputSystem {
     // ============================================================ 事件
 
     private onKeyDown(event: EventKeyboard): void {
+        // 捕获态（设置页改键）：一个键都不记。理由见 `capturing` 字段的说明。
+        if (this.capturing) {
+            return;
+        }
         const k = event.keyCode as number;
         // 浏览器按住不放会重复发 keydown，但引擎已经用 `event.repeat` 过滤过
         // （web 端 `pal/input/web/keyboard-input.js` 的 `_handleKeyboardDown`），
@@ -203,6 +221,11 @@ export class InputSystem {
     }
 
     private onKeyUp(event: EventKeyboard): void {
+        if (this.capturing) {
+            // 同理要挡：捕获期间没往 keysDown 里加过，这里删是删不存在的键；
+            // 更糟的是会把「松手」记进 keysReleased，退出捕获后让消费者看到一次假松手。
+            return;
+        }
         const k = event.keyCode as number;
         this.keysDown.delete(k);
         this.keysReleased.add(k);
@@ -214,11 +237,47 @@ export class InputSystem {
         this.keysReleased.clear();
     }
 
-    /** 清空全部输入状态。切场景、失焦时调，防止「按住某键切场景 → 主角自己走」。 */
+    /**
+     * 清空全部输入状态。切场景、失焦时调，防止「按住某键切场景 → 主角自己走」。
+     *
+     * 顺手把捕获模式也放掉：设置页若因异常没走到 `dispose()`（切场景、Alt+Tab 导致
+     * 面板没了），这是最后一道保险 —— 捕获模式挂着不放等于整个动作层失灵。
+     */
     public reset(): void {
+        this.clearState();
+        this.capturing = false;
+    }
+
+    /** 只清按键状态，不动捕获模式（内部用） */
+    private clearState(): void {
         this.keysDown.clear();
         this.keysPressed.clear();
         this.keysReleased.clear();
+    }
+
+    // ============================================================ 捕获模式
+
+    /** 是否处于改键捕获态。设置页用它决定要不要把按键当成「玩家在选新键」。 */
+    public get isCapturing(): boolean {
+        return this.capturing;
+    }
+
+    /**
+     * 进出改键捕获态。**离开设置页时务必调 `setCaptureMode(false)`**，
+     * 理由见 `capturing` 字段——忘了退出的后果是游戏内按键全失灵。
+     *
+     * 进出都清一次按键状态：玩家为了改键按住不放的那个键（比如按住 D 去改「向右移动」）
+     * 会留在 `keysDown` 里，不清掉的话退出捕获后主角会自己往右走。
+     *
+     * 注意这里调的是 `clearState()` 而不是 `reset()` —— 后者会把 `capturing` 一起放掉，
+     * 那刚进来的这一下就白设了。
+     */
+    public setCaptureMode(on: boolean): void {
+        if (this.capturing === on) {
+            return;
+        }
+        this.capturing = on;
+        this.clearState();
     }
 
     // ============================================================ 自检

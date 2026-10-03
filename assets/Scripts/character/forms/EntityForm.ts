@@ -25,7 +25,9 @@ export class EntityForm implements ICompanionForm {
         // 跳跃（二段跳）
         if (input.jump && !ctx.isDashing && !ctx.isAttacking && !ctx.isBlocking) {
             if (this.jumpCount < move.maxJumpCount) {
-                velocity.y += move.jumpSpeed;
+                // 第二跳（及以后）按倍率缩水：原样再加一个 jumpSpeed 会越跳越高，
+                // 二段跳的落点很难控制（实测反馈「跳太高了」）
+                velocity.y += move.jumpSpeed * (this.jumpCount === 0 ? 1 : move.secondJumpMult);
                 this.jumpCount += 1;
                 // 起跳即离地：物理接触回调（END_CONTACT）要等物理步进后才到，
                 // 不在此处主动置 false，本帧末尾的「着地重置」会把刚加上去的

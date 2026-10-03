@@ -25,6 +25,14 @@ export class Damageable extends Component {
     @property({ displayName: '最大生命' })
     private maxHp = 100;
 
+    /**
+     * 免伤开关。Boss 第一阶段「未识破前青禾的攻击无效」靠它实现。
+     *
+     * 放在这个通用底座上而不是写 Boss 的子类：可受击物都可能需要无敌帧/阶段免伤，
+     * 且 `CombatController` 的命中判定只认 `Damageable`，子类会被它按基类拿到。
+     */
+    public invulnerable = false;
+
     private hp = 100;
     private rigidBody: RigidBody2D | null = null;
 
@@ -41,8 +49,29 @@ export class Damageable extends Component {
         return this.maxHp;
     }
 
+    /** 剩余血量比例 [0,1]，阶段阈值判定与 UI 用 */
+    public getHpRatio(): number {
+        return this.maxHp > 0 ? Math.max(0, this.hp) / this.maxHp : 0;
+    }
+
+    public isDead(): boolean {
+        return this.hp <= 0;
+    }
+
+    /**
+     * 覆盖血量上限，并把当前血量重置为满。
+     * Boss 这类数值由 `gameConfig` 驱动的对象用（`maxHp` 只是 Inspector 默认值）。
+     */
+    public setMaxHp(value: number): void {
+        this.maxHp = Math.max(1, value);
+        this.hp = this.maxHp;
+    }
+
     public takeDamage(info: DamageInfo): void {
         if (!this.node.active || this.hp <= 0) {
+            return;
+        }
+        if (this.invulnerable) {
             return;
         }
 

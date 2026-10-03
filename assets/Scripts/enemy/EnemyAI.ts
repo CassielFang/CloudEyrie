@@ -6,15 +6,19 @@ const { ccclass } = _decorator;
 
 import { gameConfig } from '../core/GameConfig';
 import { spiritEnergySystem } from '../core/SpiritEnergySystem';
+import { MinionArrow } from './MinionArrow';
 import { applyFacingFlip, NaturalFacing } from '../core/FacingFlip';
 import { Damageable, DamageInfo } from '../combat/Damageable';
 import { CombatController, PlayerDamageResult } from '../combat/CombatController';
 
 /**
- * 敌人灰盒立绘的天然朝向（素材本身画的是朝右）。
- * 改美术素材后若朝向变了，改这一个常量即可（同 QingheController 的约定）。
+ * 敌人立绘的天然朝向**默认值**（素材本身画的是朝右）。
+ *
+ * ⚠️ 已改成**每实例可设**（`artNaturalFacing`），因为不同敌人可能朝向相反：
+ * 持弓的阳浊小怪，动画里箭是**朝左**飞的 —— 素材本身朝左画（`-1`）。
+ * 用同一个常量会让那批小怪整个左右反掉（实测反馈「小怪反了吧」）。
  */
-const ART_NATURAL_FACING: NaturalFacing = 1;
+const ART_NATURAL_FACING_DEFAULT: NaturalFacing = 1;
 /** 巡逻点到达判定阈值（像素） */
 const PATROL_ARRIVE_EPS = 12;
 /** 追击脱战余量：目标距离超过「视野 × 此倍数」才放弃追击 */
@@ -171,6 +175,23 @@ export class EnemyAI extends Component {
         spiritEnergySystem.setCombatSource(this, false);
     }
 
+    /**
+     * 远程型（持弓的阳浊小怪）：攻击距离取 `rangedAttackRange`，
+     * 且攻击时**生成一支箭的抛射物**，而不是近身直接结算伤害。
+     *
+     * 由生成方设置（`LevelDirector` 造小怪时），不是 Inspector 属性 ——
+     * 本项目的小怪参数统一走 `gameConfig.enemy`，不给单实例开面板。
+     */
+    public ranged = false;
+
+    /**
+     * 当前状态。**给表现层读的**（例如 `MinionVisual` 按状态切序列帧动画）。
+     * 状态机本身仍是私有的，外部不要用它做逻辑判断 —— 那会绕开 AI 的优先级规则。
+     */
+    public getState(): EnemyState {
+        return this.state;
+    }
+
     protected update(dt: number): void {
         if (this.state === EnemyState.Dead) {
             this.updateDead(dt);
@@ -288,7 +309,11 @@ export class EnemyAI extends Component {
 
         // 目标脱离：水平超脱战余量，或垂直超容差（青禾跳起来了 / 上了高台）。
         // 两种都算「暂时够不着」——小怪不会飞，贴到玩家正下方既追不上、看着也傻。
-        const outOfLeash = this.horizontalDistanceToTarget() > config.sightRange * CHASE_LEASH_MULT;
+        // 脱战余量要按**有效视野**算，不能用基础 sightRange ——
+        // 远程型的射程有 460，拿 140×1.3=182 当脱战线的话，
+        // 玩家还在射程内它就放弃追击了
+        const outOfLeash = this.horizontalDistanceToTarget()
+            > this.effectiveSightRange() * CHASE_LEASH_MULT;
         const outOfLevel = this.verticalOffsetToTarget() > config.verticalTolerance;
         if (outOfLeash || outOfLevel) {
             this.lostTargetRemaining += dt;
@@ -307,10 +332,17 @@ export class EnemyAI extends Component {
     private updateAttack(dt: number, dirX: number): void {
         const config = gameConfig.enemy;
         this.attackElapsed += dt;
-        this.facing = dirX;
+        // 远程型一旦开始拉弓就**锁死朝向** —— 撒手前还跟着玩家转身，
+        // 会出现「箭朝左飞、弓却转向右」的穿帮（射向在 enterAttack 时已定）。
+        if (!this.ranged) {
+            this.facing = dirX;
+        }
         this.setVelocityX(0);
 
-        if (!this.attackHitDone && this.attackElapsed >= config.attackStartup) {
+        // 远程型的「出招」由动画驱动：`MinionVisual` 在**放箭那一帧**回调 `releaseArrow()`，
+        // 所以这里不再按时长自己生成箭 —— 否则箭和拉弓动画对不上，
+        // 看着就是「弓还没撒手，箭已经飞出去了」。
+        if (!this.ranged && !this.attackHitDone && this.attackElapsed >= config.attackStartup) {
             this.attackHitDone = true;
             // 出招瞬间再确认一次：青禾在这段前摇里跳开 / 拉开距离就落空
             if (this.isTargetInAttackRange(ATTACK_REACH_MULT)) {
@@ -320,7 +352,9 @@ export class EnemyAI extends Component {
             }
         }
 
-        if (this.attackElapsed >= config.attackDuration) {
+        // 远程攻击要等拉弓动画走完，时长比近战长得多（配置里单列）
+        const duration = this.ranged ? config.rangedAttackDuration : config.attackDuration;
+        if (this.attackElapsed >= duration) {
             this.setState(EnemyState.Chase);
         }
     }
@@ -372,7 +406,14 @@ export class EnemyAI extends Component {
         this.setState(EnemyState.Attack);
         this.attackElapsed = 0;
         this.attackHitDone = false;
-        this.cooldownRemaining = config.attackCooldown;
+        // ⚠️ 冷却是在 update 里逐帧递减的，**攻击期间也在走**。
+        // 近战动画只有 0.55 秒，所以「时长 < 冷却」时周期自然是冷却；
+        // 但远程的拉弓动画长达 1.75 秒、和冷却几乎相等 —— 冷却会在动画结束的同一刻
+        // 走完，小怪于是**一直在拉弓**（观感就是「箭永远吊着」）。
+        // 远程因此把冷却算在**动画结束之后**，中间留出收弓喘息的间隔。
+        this.cooldownRemaining = this.ranged
+            ? config.rangedAttackDuration + config.attackCooldown
+            : config.attackCooldown;
         this.facing = this.dirXToTarget();
         this.setVelocityX(0);
         log(`[EnemyAI] ${this.node.name} 攻击`);
@@ -480,6 +521,45 @@ export class EnemyAI extends Component {
         log(`[EnemyAI] 命中玩家，扣灵炁 ${result.spiritCost.toFixed(1)}（原始 ${amount}）`);
     }
 
+    /**
+     * **放箭**。由 `MinionVisual` 在攻击动画的放箭帧回调 —— 这样箭的出手时刻
+     * 和「撒手」那一帧严格对齐，而不是各按各的计时器。
+     */
+    public releaseArrow(): void {
+        if (!this.ranged || this.state === EnemyState.Dead) {
+            return;
+        }
+        this.hitFlashRemaining = HIT_FLASH_DURATION;
+        this.shootArrow();
+    }
+
+    /**
+     * 箭的出生点相对本体中心的偏移。
+     *
+     * `ARROW_DY` 是**量出来的**：在打包画布（512）上，搭在弦上的箭位于身体中心
+     * 下方 21px（身体高 335），换算到世界单位（帧 256 × artScale 0.66）约 **13**。
+     * 原来按节点原点生成，箭从比弓高的地方冒出来。
+     * ⚠️ `artScale` 一改这个数就要跟着改。
+     */
+    private static readonly ARROW_DX = 55;
+    private static readonly ARROW_DY = -13;
+
+    /** 射一支箭。出生点对齐弓的高度，朝**拉弓时锁定的朝向**飞。 */
+    private shootArrow(): void {
+        const parent = this.node.parent;
+        if (!parent) {
+            return;
+        }
+        // 用 `this.facing`（进攻击时锁定）而不是重新算朝向 —— 保证箭和弓同向
+        const dir = this.facing || 1;
+        const cfg = gameConfig.enemy;
+        const pos = this.node.worldPosition;
+        MinionArrow.spawn(parent,
+            new Vec2(pos.x + dir * EnemyAI.ARROW_DX, pos.y + EnemyAI.ARROW_DY),
+            dir, cfg.arrowDamage, cfg.arrowSpeed);
+        log(`[EnemyAI] ${this.node.name} 射箭（朝 ${dir > 0 ? '右' : '左'}）`);
+    }
+
     // ============ 工具 ============
 
     /**
@@ -522,14 +602,29 @@ export class EnemyAI extends Component {
         return this.verticalOffsetToTarget() <= gameConfig.enemy.verticalTolerance;
     }
 
+    /**
+     * 视野距离。远程型的视野要**比射程更远**，两者相等会出问题：
+     * 只要看得见就够得着 → 一进视野就直接开打、永远不走过来，
+     * 表现是「发现玩家之后返回巡逻就不走路了」（实测反馈）。
+     * 留出 1.5 倍余量，它才会「看见 → 走近 → 进入射程再打」。
+     */
+    private effectiveSightRange(): number {
+        return this.ranged
+            ? Math.max(gameConfig.enemy.sightRange, gameConfig.enemy.rangedAttackRange * 1.5)
+            : gameConfig.enemy.sightRange;
+    }
+
     /** 目标是否在视野内（发现 / 脱战判定用） */
     private isTargetInSight(): boolean {
-        return this.isTargetInRange(gameConfig.enemy.sightRange);
+        return this.isTargetInRange(this.effectiveSightRange());
     }
 
     /** 目标是否在攻击距离内（reachMult 供命中那一下放宽用） */
     private isTargetInAttackRange(reachMult = 1): boolean {
-        return this.isTargetInRange(gameConfig.enemy.attackRange * reachMult);
+        const range = this.ranged
+            ? gameConfig.enemy.rangedAttackRange
+            : gameConfig.enemy.attackRange;
+        return this.isTargetInRange(range * reachMult);
     }
 
     /** 背离目标的方向（完美格挡反制用） */
@@ -564,11 +659,30 @@ export class EnemyAI extends Component {
         this.patrolTargetX = this.spawnX + (Math.random() * 2 - 1) * range;
     }
 
+    /**
+     * 立绘的天然朝向：`1` = 素材画的是朝右，`-1` = 朝左。
+     * 传错的后果是「攻击打到背后」—— 判定盒和特效按角色朝向摆，立绘却停在反方向。
+     * 由生成方按素材设置（`LevelDirector.makeMinion`）。
+     */
+    public artNaturalFacing: NaturalFacing = ART_NATURAL_FACING_DEFAULT;
+
     private applyFacing(): void {
-        applyFacingFlip(this.artNode, this.facing, ART_NATURAL_FACING);
+        applyFacingFlip(this.artNode, this.facing, this.artNaturalFacing);
     }
 
+    /**
+     * 状态染色（灰盒期用来区分巡逻/发现/追击/攻击）。
+     *
+     * ⚠️ **接入正式逐帧美术后要关掉** —— 它会把整只小怪染成橙/红，
+     * 真美术上非常难看（实测截图里小怪攻击时整只变红）。
+     * 由生成方（`LevelDirector.makeMinion`）设成 false。
+     */
+    public tintByState = true;
+
     private refreshTint(): void {
+        if (!this.tintByState || !this.artSprite) {
+            return;
+        }
         if (!this.artSprite) {
             return;
         }

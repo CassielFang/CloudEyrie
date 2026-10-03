@@ -16,6 +16,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 两个场景：`assets/Scene/Title.scene`（游戏首页）→ 点「开始游戏」→ `assets/Scene/main.scene`（关卡）。
   main.scene 内含一个常驻 `GameManager` 节点（`director.addPersistRootNode`）和一个 `Canvas`；**Title.scene 故意不放 GameManager**
   （`GameManager.instance` 是进程内静态单例，两边都放会让 main 的副本自杀、且 GameConfig 的 Inspector 值取自先加载的那个）。
+- ⚠️ **游戏代码里别在编辑器预览时关窗口**：`window.close()` 和 `game.end()` 是同一条路
+  （`game.end()` → `systemInfo.close()` → `_onClose` → `systemInfo.exit()` → `window.close()`），
+  在 Game View 的 Electron `<webview>` 里会把预览视图真的销毁、编辑器卡死只能强制重启（踩过两次）。
+  **挡它要用 `EDITOR`（`cc/env`），不是 `PREVIEW`**：Game View 跑的是 **editor target**，
+  那里 `EDITOR=true` 而 `PREVIEW=false`。用 `EDITOR` 挡的还有「编辑器里请求全屏」（Game View 里
+  `supportsFullScreen` 居然是 true，不挡就会真发出去）。浏览器预览走 preview target，`EDITOR` 为 false。
 - ⚠️ **预览运行时无法保存场景**：`Ctrl+S` 会"看起来成功"但文件根本不写。必须先**停止预览**再保存，然后重新运行预览。
   （改 `.ts` 后也**必须重启预览**才生效——编辑器会自动重编译，但运行中的预览不热重载。
   另外编辑器重编译有延迟，改完 `.ts` 立刻重启预览会跑的还是旧代码，必要时 `refresh_assets` 后等几秒。）
@@ -56,6 +62,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `MistShot.ts`：灵雾态灵弹，沿方向飞行，命中 `Damageable` 后自毁。
 - `HitSpark.ts`：命中火花，短命灰盒特效（放大 + 淡出后自毁），不参与任何伤害结算。
 
+**运行时新建碰撞体的硬约束（改之前务必读）**：
+
+- `BoxCollider2D` 的 `size` / `offset` setter **只存值，不重建 Box2D 夹具**。
+  设完**必须调 `col.apply()`**，否则物理世界里一直是字段默认的 `Size(1,1)`
+  —— 一个 1×1 像素的碰撞体，角色直接穿过去。场景里序列化好的碰撞体没这问题，
+  **只有运行时 `new Node()` + `addComponent` 的才会踩**。
+- 更坑的是 **`col.size` 和 `col.worldAABB` 都会骗人**：两者都是从 JS 字段算的，
+  夹具是 1×1 也照样报「3200×80」。所以排查碰撞**不能用几何读数**，
+  要用行为判据（例如每秒打一次角色 y，看它是否稳住）。
+
 命中判定的两个硬约束（改之前务必读）：
 - **`AttackHitBox` 的 `BoxCollider2D.offset` 必须保持 `(0,0)`** —— 左右镜像只翻**节点位置**，offset 不跟着翻。
   `CombatController.onLoad` 会把 offset 折进节点位置并归零做兜底，但别在 Inspector 里设 offset。
@@ -67,20 +83,81 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - `TitleScreen.ts`：首页（`assets/Scene/Title.scene` 的唯一组件）。背景暗角 / 标题 / 菜单 / 灵炁光点 / 子面板调度全在这里，
   版式常量集中在文件顶部。三段状态机：`Prompt`（按任意键继续）→ `Menu`（五项竖排）→ `Panel`（子面板打开）。
-- `TitleSubPanels.ts`：首页的设置 / 成就 / 制作组三个面板，**普通工具类**（非 Component），由 TitleScreen new 出来。
-  三个面板目前都是**占位**——音频系统、成就系统、存档系统都还没写。
-  ⚠️ 制作组名单在 `CREDITS` 常量里，是 `（待填）`，等真实分工。
+  **进菜单时会请求全屏**（`TitleScreen.requestFullScreen()`）——浏览器要求全屏必须由用户交互触发，
+  所以放在 `enterMenu()`（玩家第一次按键/点击的回调）里，不能放 `onLoad`；原生上
+  `screen.supportsFullScreen` 恒为 false，会自己跳过。
+  **子面板的返回键是 E 不是 ESC**（`PANEL_BACK_KEY`）：Web 全屏时 ESC 归浏览器管（退出全屏）。
+- `TitleSubPanels.ts`：首页的设置 / 成就 / 制作组三个面板的**框架**，**普通工具类**（非 Component），由 TitleScreen new 出来。
+  只管底板、宣纸、标题、返回提示、开关与命中判定；具体内容归各自的文件（见下）。
   面板贴图（宣纸九宫格 / 卷轴）在场景里以**隐藏模板节点**的形式存在，代码克隆出来用——
   它们不在 `resources/` 下，没法 `resources.load`。
+  - **设置页已实现**（见 `SettingsPanel.ts`）；**成就页仍是占位**（成就系统还没写）。
+  - ⚠️ 制作组名单在 `CREDITS` 常量里（已填 8 人）。其中「䴰」(U+4D30) **不在 `font.ttf` 里**，
+    所以那一列名字改用系统字体（`label.font = null`）—— 挂毛笔体会静默掉字、把名字写错。
+    加名字前先确认字形在不在，字体文件补上后把那句删掉即可。
+- `SettingsPanel.ts`：设置页内容（音量 / 键位两个页签），同样是**普通工具类**，由 `TitleSubPanels` new。
+  它只是把 `audioManager` / `inputSystem` 已有的链路接到界面上，自己不存状态。
+  改键要配 `inputSystem.setCaptureMode()`（用完必须退出，否则整个动作层失灵）；
+  接口与踩过的坑见 `docs/设置页接口.md`。`PanelDeps.ts` 是它和面板框架共用的依赖注入接口（单独放以免两个文件互相 import）。
 - `DebugHud.ts`：左上角调试 HUD，显示**灵炁条 / 当前形态 / 敌人血量**这三样测试中最"看不见"的数据。
   整个 UI 在 `onLoad` 里用代码搭（挂到 `Canvas/DebugHud` 即可，无需在 Inspector 连引用），
   血条底图从 `assets/resources/white.png` 运行时加载。**正式 UI 做好后整个文件删掉。**
 
-### `enemy/` `puzzle/` `audio/`
+### `enemy/` —— 敌人
 
-预留目录，目前只有 `.meta` 占位，尚未实现。敌人 AI 采用行为树方案，设计见 `logs/B/《云岫》敌人行为树设计文档/`（阳浊/阴浊两类敌人，黑板书 `IsVisible` 显形状态等）。
+- `EnemyAI.ts`：小怪 FSM（巡逻 → 发现 → 追击 → 攻击 → 死亡）+ 一层优先级更高的受击硬直。
+  ⚠️ **它不是行为树**，是手写扁平状态机 —— 设计文档里画的是行为树，落地的是 FSM。
+  全 private、无基类，**Boss 无法继承，只能另写并抄它的模式**。
+  数值全部来自 `gameConfig.enemy`（全局单例，**不给单实例配**）。
+- `boss/`：`BossP1AI.ts`（九尾狐 P1「幻影」）+ `BossClone.ts`（分身标记）。
+  Boss 的真身永远是挂 `BossP1AI` 的根节点，另两个是程序化建的诱饵。
+  开打时机由 `world/LevelDirector` 决定（`autoStart` 要关掉）。
 
-**当前敌人只是个不会动的靶子**（`Canvas/enemy`，挂 `Damageable`），格挡/完美格挡/受击扣灵炁等链路都写好了但在等 AI 调用。
+### `fx/` —— 序列帧播放（美术组给的视频素材）
+
+- `SequencePlayer.ts`：播 `assets/Resources/video_fx/` 下的图集序列。
+  **滑动窗口页缓存**——只驻留播放头附近的页，播过的 `decRef`。九段素材合计
+  15.8 亿像素（原规格），全量常驻显存不可能，必须流式。
+- `StageTransition.ts`：全屏转场叠层（压暗 → 播动画 → 推进阶段）。**不复用 `ui/ScreenStage`**
+  （那是整页场景组件，契约不同）。
+
+### `world/` —— 关卡与镜头
+
+- `ParallaxBackground.ts`：视差卷轴背景。核心一行 `node.x = cameraX * (1 - factor)`。
+  图层宽度由相机行程反推：`viewW + factor × 行程`，少给会在关卡末尾露空。
+- `CameraFollow.ts`：直接移动 `Canvas/Camera` 实现横版跟随（**不是**移动世界根节点，
+  那样会和玩家刚体打架）。代价是 HUD 会被推走，所以屏幕固定的东西要挂 `ScreenFixed`。
+- `ScreenFixed.ts`：把节点钉在屏幕上，反向补偿相机位移。
+- `LevelDirector.ts`：按「关卡总览」的段落顺序推进，并搭出关卡几何与道具。
+
+### `puzzle/` `audio/`
+
+`audio/` 已有 `AudioManager.ts`；`puzzle/` 仍是空目录。敌人设计见
+`logs/B/《云岫》敌人行为树设计文档/`。灵界屏障 / 机关 / 灵泉的**贴图**已在
+`assets/Resources/场景小物件/`，但触发逻辑还没写。
+
+## 素材流水线（美术组的视频 → 引擎）
+
+美术组交来的是**视频**（`assets/Resources/视频合集/`），引擎要的是**图集序列**。
+三步，都在 `art-source/_tools/`：
+
+```bash
+cd art-source/_tools
+python gen_video_fx.py --export      # 视频 → PNG 序列（抠背景 / 接循环 / 主体等大）
+python pack_atlas.py --scale 0.5     # 序列 → 图集页 + 索引，落到 assets/Resources/video_fx/
+python extract_arrow.py              # 特例：从攻击动画里抽独立抛射物（见该文件注释）
+```
+
+关键约定：
+
+- **原始序列永远留在 `art-source/_video_out/`**，缩放放在打包阶段（`--scale`）。
+  换倍率只需重跑 `pack_atlas.py`，不必回视频重新抽帧。
+- `SequencePlayer` 在运行时按 `manifest.json` 取帧，播放器不关心布局。
+- ⚠️ **`--scale` 一改，`BossP1AI.artScale` 要成比例改** —— 它乘的是打包后的帧尺寸。
+  倍率 1.0 时帧是 768²，取 0.6；倍率 0.5 时帧是 384²，要取 1.2。
+- ⚠️ **别按原规格全量导入**：723 页、5.89GB 会把编辑器的 WebGL 上下文搞崩。
+- ⚠️ **`.webm` 不被识别为 `cc.VideoClip`**（只认 `.mp4`），而 Web 上能带 alpha 的
+  只有 VP9/WebM —— 所以**透明视频这条路走不通**，全屏过场只能用 PNG 序列。
 
 ## 操作与关键玩法事实
 

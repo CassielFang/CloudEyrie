@@ -61,6 +61,16 @@ export class AudioManager {
         gameSettings.setVolume(bus, v);
     }
 
+    /**
+     * 三档音量一起恢复默认（主 0.8 / 音乐 0.7 / 音效 0.8）。
+     *
+     * 默认值表在 `GameSettings` 里是私有的，设置页拿不到、也不该硬编码一份，
+     * 所以在这里开个口子 —— 界面只跟 `audioManager` 说话。
+     */
+    public resetAudio(): void {
+        gameSettings.resetAudio();
+    }
+
     /** 实际生效的音量 = 主音量 × 分组音量。播放时用这个值，不要直接用分组值。 */
     public getEffectiveVolume(bus: AudioBus): number {
         return this.getMasterVolume() * this.getChannelVolume(bus);

@@ -1,0 +1,223 @@
+
+青禾1.png
+size: 2009,668
+format: RGBA8888
+filter: Linear,Linear
+repeat: none
+bz
+  rotate: true
+  xy: 714, 8
+  size: 56, 85
+  orig: 57, 85
+  offset: 1, 0
+  index: -1
+cf
+  rotate: true
+  xy: 493, 2
+  size: 46, 219
+  orig: 47, 220
+  offset: 1, 0
+  index: -1
+mh
+  rotate: true
+  xy: 964, 171
+  size: 55, 298
+  orig: 57, 299
+  offset: 1, 1
+  index: -1
+ss
+  rotate: false
+  xy: 1273, 98
+  size: 257, 257
+  orig: 257, 257
+  offset: 0, 0
+  index: -1
+yd
+  rotate: false
+  xy: 945, 57
+  size: 166, 112
+  orig: 167, 119
+  offset: 0, 1
+  index: -1
+刘海右
+  rotate: false
+  xy: 1329, 2
+  size: 46, 94
+  orig: 47, 94
+  offset: 0, 0
+  index: -1
+刘海右2
+  rotate: false
+  xy: 1948, 293
+  size: 52, 129
+  orig: 52, 129
+  offset: 0, 0
+  index: -1
+刘海左1
+  rotate: false
+  xy: 1918, 42
+  size: 60, 118
+  orig: 60, 118
+  offset: 0, 0
+  index: -1
+刘海左2
+  rotate: false
+  xy: 1272, 2
+  size: 55, 94
+  orig: 59, 98
+  offset: 3, 4
+  index: -1
+前衣摆
+  rotate: true
+  xy: 2, 57
+  size: 154, 550
+  orig: 154, 551
+  offset: 0, 1
+  index: -1
+右大腿
+  rotate: true
+  xy: 964, 228
+  size: 127, 307
+  orig: 127, 307
+  offset: 0, 0
+  index: -1
+右大臂
+  rotate: false
+  xy: 1863, 424
+  size: 144, 242
+  orig: 145, 242
+  offset: 0, 0
+  index: -1
+右小腿
+  rotate: true
+  xy: 1527, 381
+  size: 128, 303
+  orig: 131, 342
+  offset: 0, 0
+  index: -1
+右小臂
+  rotate: false
+  xy: 862, 35
+  size: 81, 176
+  orig: 82, 177
+  offset: 0, 1
+  index: -1
+右手
+  rotate: false
+  xy: 1377, 3
+  size: 69, 93
+  orig: 70, 94
+  offset: 0, 1
+  index: -1
+右脚
+  rotate: false
+  xy: 1802, 33
+  size: 114, 114
+  orig: 115, 115
+  offset: 0, 1
+  index: -1
+右衣摆前
+  rotate: true
+  xy: 2, 13
+  size: 42, 489
+  orig: 42, 490
+  offset: 0, 0
+  index: -1
+后发
+  rotate: true
+  xy: 2, 213
+  size: 453, 960
+  orig: 457, 967
+  offset: 4, 7
+  index: -1
+后脑
+  rotate: true
+  xy: 1113, 62
+  size: 107, 157
+  orig: 107, 157
+  offset: 0, 0
+  index: -1
+后衣摆右
+  rotate: true
+  xy: 964, 357
+  size: 118, 561
+  orig: 118, 562
+  offset: 0, 0
+  index: -1
+后衣摆左
+  rotate: true
+  xy: 964, 477
+  size: 189, 507
+  orig: 189, 507
+  offset: 0, 0
+  index: -1
+左大腿
+  rotate: true
+  xy: 554, 66
+  size: 145, 306
+  orig: 145, 306
+  offset: 0, 0
+  index: -1
+左大臂
+  rotate: true
+  xy: 1532, 130
+  size: 143, 257
+  orig: 144, 257
+  offset: 1, 0
+  index: -1
+左小腿
+  rotate: true
+  xy: 1473, 511
+  size: 155, 388
+  orig: 156, 388
+  offset: 0, 0
+  index: -1
+左小臂
+  rotate: false
+  xy: 1833, 287
+  size: 113, 135
+  orig: 113, 135
+  offset: 0, 0
+  index: -1
+左手
+  rotate: false
+  xy: 1448, 17
+  size: 75, 79
+  orig: 76, 80
+  offset: 0, 0
+  index: -1
+左脚
+  rotate: false
+  xy: 1889, 162
+  size: 96, 123
+  orig: 97, 126
+  offset: 0, 1
+  index: -1
+左衣摆
+  rotate: true
+  xy: 1532, 275
+  size: 104, 299
+  orig: 104, 299
+  offset: 0, 0
+  index: -1
+帽子
+  rotate: false
+  xy: 1532, 50
+  size: 268, 78
+  orig: 269, 103
+  offset: 0, 3
+  index: -1
+揪揪
+  rotate: true
+  xy: 1525, 2
+  size: 46, 42
+  orig: 46, 43
+  offset: 0, 0
+  index: -1
+脸
+  rotate: false
+  xy: 1791, 149
+  size: 96, 124
+  orig: 97, 124
+  offset: 1, 0
+  index: -1

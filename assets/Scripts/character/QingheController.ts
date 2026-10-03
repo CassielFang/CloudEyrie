@@ -41,6 +41,8 @@ export class QingheController extends Component {
     private groundNode: Node | null = null;
     @property
     private jumpSpeed = 10;
+    @property({ tooltip: '二段跳的速度倍率；1 = 和第一跳一样高' })
+    private secondJumpMult = 0.6;
     @property
     private maxJumpCount = 2;
 
@@ -165,6 +167,7 @@ export class QingheController extends Component {
         const move: MovementParams = {
             moveSpeed: this.moveSpeed,
             jumpSpeed: this.jumpSpeed,
+            secondJumpMult: this.secondJumpMult,
             maxJumpCount: this.maxJumpCount,
             dashSpeed: this.dashSpeed,
             dashDuration: this.dashDuration,

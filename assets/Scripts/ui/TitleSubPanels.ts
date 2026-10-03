@@ -1,7 +1,11 @@
 import {
     Node, Sprite, Label, UITransform, UIOpacity, Vec2,
-    Color, tween,
+    Color, EventKeyboard, tween,
 } from 'cc';
+
+import { COLOR_PANEL_HINT, COLOR_PANEL_INK } from './ScreenStage';
+import { PanelDeps } from './PanelDeps';
+import { SettingsPanel } from './SettingsPanel';
 
 /**
  * 首页的三个子面板：设置 / 成就 / 制作组。
@@ -10,10 +14,9 @@ import {
  * `TitleScreen` 在 `onLoad` 里 new 出来，面板节点挂在它给的父节点下，
  * 生命周期跟着首页走，不需要自己注册引擎回调。
  *
- * ⚠️ **三个面板目前只有框，没有内容** —— 按需求先把内容留空，等后续版本再做。
- * 现在打开任何一项看到的都是「宣纸框 + 标题」，用来确认版面尺寸与交互
- * （打开、ESC 或点框外返回）是通的。填内容时在 `buildXxx()` 的标题之后接着加即可，
- * `PANEL_W` / `PANEL_H` 就是内容可用区域，不用再动框架代码。
+ * 本类只管**框架**：底板、宣纸、标题、返回提示、开关与淡入淡出、命中判定。
+ * 具体内容归各自的文件 —— 设置页在 `SettingsPanel`（已经能用），
+ * 成就与制作组目前仍只有框 + 标题，填的时候照 `buildSettings()` 的写法加。
  *
  * 视觉走 GDD §7.3 的「石碑、卷轴意象，半透明水墨质感」：底图复用美术组生成的
  * `panel_paper.png`（宣纸九宫格）。制作组原来单独用 `panel_scroll.png` 卷轴，
@@ -57,6 +60,35 @@ const BACKING_PAD_Y = 50;
 const HEADING_Y = PANEL_H / 2 - 28;
 const HEADING_SIZE = 40;
 
+/**
+ * 「按 E 退出」那一行。放在**地脚留白带里，与天头的标题完全镜像**。
+ *
+ * 同样别按比例算：地脚墨线也在距边 54~67px 处（实测底边与顶边对称），
+ * 留白带只有 `-249 ~ -310` 这么高，字号 22 的文字占 26px，落在带子里正好。
+ * 放到带子**以内**（比如 -218）会紧贴内容区，版面上不如镜像好看。
+ *
+ * ⚠️ 用 **E** 而不是 ESC：Web 上游戏是全屏跑的，而 **ESC 是浏览器保留的「退出全屏」键**
+ * （页面试图拦也拦不住），拿它当返回键会一边关面板一边掉出全屏。
+ */
+const EXIT_HINT_Y = -PANEL_H / 2 + 28;
+const EXIT_HINT_SIZE = 22;
+
+/**
+ * 制作组名单（一排一个名字）。
+ *
+ * ⚠️ 这份名单里有 `font.ttf` **缺的字**，见 `buildCredits()` —— 整列名字改用系统字体。
+ * 加名字前先确认字形在不在：`font.ttf` 是毛笔行楷，扩展区汉字（如「䴰」U+4D30）基本都没有。
+ */
+const CREDITS = ['祁烬', '泠琼', '樱团', '䴰子', '雨迹', '规心', '穗岐', '柒月'];
+const CREDITS_SIZE = 30;
+const CREDITS_TOP = 170;
+const CREDITS_GAP = 42;
+
+/** 名单末尾那行说明。它的字 font.ttf 里都有，所以和标题一样保留毛笔体。 */
+const CREDITS_NOTE = '排名不分先后';
+const CREDITS_NOTE_Y = -196;
+const CREDITS_NOTE_SIZE = 22;
+
 /** 纸在暮色里会暗一档 —— 像月光下的宣纸。压太狠就和深墨字糊在一起了。 */
 const PAPER_TINT = new Color(196, 206, 214, 255);
 
@@ -68,16 +100,6 @@ const PAPER_TINT = new Color(196, 206, 214, 255);
  */
 const BACKING_INK = new Color(186, 192, 191, 245);
 
-const COLOR_HEADING = new Color(46, 116, 132, 255);
-
-interface PanelDeps {
-    /** 建一个居中描边文本，复用首页那套字体与描边设置 */
-    makeLabel(parent: Node, name: string, text: string, size: number,
-        color: Color, outline?: number): Label;
-    /** 克隆场景里的模板节点（面板贴图不在 resources/ 下，只能这样拿） */
-    clone(templateName: string, name: string, parent: Node): Node | null;
-}
-
 export class TitleSubPanels {
 
     private root: Node | null = null;
@@ -85,6 +107,8 @@ export class TitleSubPanels {
     private body: Node | null = null;
     /** 面板底板，用来做「点面板外返回」的命中判定 */
     private backing: Node | null = null;
+    /** 当前面板的内容对象（目前只有设置页有）。每次 open 重建，所以必须显式 dispose */
+    private content: SettingsPanel | null = null;
 
     private opened = false;
 
@@ -114,6 +138,8 @@ export class TitleSubPanels {
 
     public open(kind: SubPanelKind): void {
         const root = this.getRoot();
+        // 先拆旧内容再销毁节点：内容对象在全局单例上挂过监听（详见 disposeContent）
+        this.disposeContent();
         if (this.body) {
             this.body.destroy();
         }
@@ -142,6 +168,9 @@ export class TitleSubPanels {
         if (!this.opened) {
             return;
         }
+        // 关的瞬间就收掉内容，**不能等淡出 tween 结束**：这 0.2 秒里内容还挂在
+        // 全局单例上（改键捕获模式），拖到回调里再清就晚了一拍
+        this.disposeContent();
         this.opened = false;
         const op = this.opacity;
         const root = this.root;
@@ -163,25 +192,85 @@ export class TitleSubPanels {
         return ut ? ut.getBoundingBoxToWorld().contains(uiPoint) : false;
     }
 
+    /**
+     * 把按键先交给面板内容。返回 true = 已消费，`TitleScreen` 不要再处理。
+     *
+     * 目前只有设置页会消费：改键捕获期间 E 是「取消改键」而不是「退出面板」，
+     * 不先问一声的话，玩家想取消改键会被直接踢出面板。
+     */
+    public handleKeyDown(e: EventKeyboard): boolean {
+        return this.content ? this.content.handleKeyDown(e) : false;
+    }
+
+    /**
+     * 场景卸载时调（见 `TitleScreen.onDestroy`）。
+     *
+     * `eventBus` 是模块级单例、活得比场景久，内容对象若还挂着订阅，
+     * 切场景后设置一变就会回调到已销毁的节点上。
+     */
+    public dispose(): void {
+        this.disposeContent();
+    }
+
+    private disposeContent(): void {
+        if (this.content) {
+            this.content.dispose();
+            this.content = null;
+        }
+    }
+
     // ======================================================== 三个面板
-    // 现在都只有框 + 标题，内容待做。
+    // 成就与制作组仍然只有框 + 标题，内容待做。
 
     private buildSettings(): void {
         const body = this.body!;
         this.attachPaper(body, PANEL_W, PANEL_H);
         this.heading(body, '设    置');
+        this.exitHint(body);
+        this.content = new SettingsPanel(body, this.deps);
     }
 
     private buildAchievements(): void {
         const body = this.body!;
         this.attachPaper(body, PANEL_W, PANEL_H);
         this.heading(body, '成    就');
+        this.exitHint(body);
     }
 
+    /**
+     * 制作组名单：一排一个名字，末尾一行「排名不分先后」。
+     *
+     * ⚠️ **整列名字用系统字体，不挂 `font.ttf`**：名单里「䴰」(U+4D30) 不在字体的
+     * cmap 里，挂毛笔字体会**静默掉字**，把「䴰子」变成「子」—— 那是把一个真实的人
+     * 的名字写错，比字形不统一严重得多（其余 15 个字字体都有）。
+     * 面板标题与末尾那行说明的字都在字体里，所以仍用毛笔体，只有名字这一列有差异。
+     *
+     * 等字体文件补上这个字形，把下面那句 `label.font = null` 删掉即可恢复统一。
+     * （`Label.font` 置空 = 回到系统字体，见 `2d/components/label.ts` 的 setter。）
+     */
     private buildCredits(): void {
         const body = this.body!;
         this.attachPaper(body, PANEL_W, PANEL_H);
         this.heading(body, '制 作 组');
+
+        for (let i = 0; i < CREDITS.length; i += 1) {
+            const n = new Node(`Name${i}`);
+            n.layer = body.layer;
+            body.addChild(n);
+            n.addComponent(UITransform);
+            n.setPosition(0, CREDITS_TOP - i * CREDITS_GAP, 0);
+            const label = this.deps.makeLabel(n, 'Label', CREDITS[i], CREDITS_SIZE, COLOR_PANEL_INK, 0);
+            label.font = null;
+        }
+
+        const note = new Node('Note');
+        note.layer = body.layer;
+        body.addChild(note);
+        note.addComponent(UITransform);
+        note.setPosition(0, CREDITS_NOTE_Y, 0);
+        this.deps.makeLabel(note, 'Label', CREDITS_NOTE, CREDITS_NOTE_SIZE, COLOR_PANEL_HINT, 0);
+
+        this.exitHint(body);
     }
 
     // ======================================================== 面板底板
@@ -254,6 +343,18 @@ export class TitleSubPanels {
         parent.addChild(n);
         n.addComponent(UITransform);
         n.setPosition(0, HEADING_Y, 0);
-        this.deps.makeLabel(n, 'Label', text, HEADING_SIZE, COLOR_HEADING, 0);
+        // outline = 0：面板底下垫了不透明底衬，字压的是浅色平面而不是山水画，
+        // 默认那圈深色描边在这里只会把字糊脏
+        this.deps.makeLabel(n, 'Label', text, HEADING_SIZE, COLOR_PANEL_INK, 0);
+    }
+
+    /** 三个面板共用的返回提示，位置与天头的标题镜像。见 `EXIT_HINT_Y`。 */
+    private exitHint(parent: Node): void {
+        const n = new Node('ExitHint');
+        n.layer = parent.layer;
+        parent.addChild(n);
+        n.addComponent(UITransform);
+        n.setPosition(0, EXIT_HINT_Y, 0);
+        this.deps.makeLabel(n, 'Label', '按 E 退 出', EXIT_HINT_SIZE, COLOR_PANEL_HINT, 0);
     }
 }

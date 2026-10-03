@@ -32,7 +32,12 @@ export interface SpiritConfig {
     cloudDashCost: number;          // 踏云闪
     mistShotCost: number;           // 灵雾普攻 /发
     mergePurifyCostPerSec: number;  // 灵合净化 /秒
-    mergeBurstCost: number;         // 灵合范围攻击
+    mergeBurstCost: number;
+    // ---- 灵合形态的输出（以前只有消耗、没有伤害）----
+    mergePurifyDamagePerSec: number;  // 净化光环：范围内每秒对目标造成的伤害
+    mergePurifyRadius: number;        // 净化光环半径
+    mergeBurstDamage: number;         // 灵炁爆发：单次 AOE 伤害
+    mergeBurstRadius: number;         // 灵炁爆发半径         // 灵合范围攻击
     blockCost: number;              // 格挡（完美格挡不扣）
 
     // 灵雾形态持续消耗
@@ -91,6 +96,34 @@ export interface EnemyConfig {
     patrolPause: number;        // 巡逻点停留 /秒
     discoverDuration: number;   // 发现反应时间 /秒
     deathDuration: number;      // 死亡表现时长 /秒
+    // ---- 远程型（持弓的阳浊小怪）----
+    rangedAttackRange: number;  // 远程攻击距离（比近战大得多，弓箭本来就该离远打）
+    rangedAttackDuration: number; // 远程攻击总时长，要**和攻击动画对齐**（见 MinionVisual 的帧区间）
+    rangedAttackTimeScale: number; // 张弓搭箭的播放倍速（越大越快）；会反过来改变实际时长
+    arrowDamage: number;        // 箭的伤害（扣灵炁）
+    arrowSpeed: number;         // 箭的飞行速度（像素/秒）
+}
+
+/**
+ * 九尾狐 Boss 数值。
+ *
+ * ⚠️ 别和 BOSS 面板里的 `bossMeleeDamage` / `bossSkillDamage` 搞混 ——
+ * 那两个其实是 `SpiritConfig` 的字段（「Boss 打玩家扣多少灵炁」），
+ * 不是 Boss 自身属性，而且目前全项目无人消费。
+ *
+ * 取值依据 `docs/关于boss战的一些修改.md`（比 17 天计划新，冲突时以它为准）：
+ * 总血 1000，P1 300 点 → 70% 处转场。
+ */
+export interface BossConfig {
+    maxHp: number;              // Boss 总血量
+    phase2HpRatio: number;      // 进入 P2 的血量比（P1 掉到这个比例就转场）
+    phase3HpRatio: number;      // 进入 P3 的血量比
+    cloneCount: number;         // P1 分身数量（1 真 N-1 假）
+    cloneSpread: number;        // 分身散布的半宽（像素）
+    splitDamage: number;        // 分裂瞬间对玩家的伤害
+    splitDamageRadius: number;  // 分裂伤害的作用半径（像素）
+    reshuffleInterval: number;  // 分身重排间隔 /秒
+    identifyRadius: number;     // 灵雾靠近多远算「识破」（像素）
 }
 
 function createDefaultSpiritConfig(): SpiritConfig {
@@ -117,6 +150,10 @@ function createDefaultSpiritConfig(): SpiritConfig {
         mistShotCost: 5,
         mergePurifyCostPerSec: 20,
         mergeBurstCost: 30,
+        mergePurifyDamagePerSec: 30,
+        mergePurifyRadius: 220,
+        mergeBurstDamage: 50,
+        mergeBurstRadius: 340,
         blockCost: 10,
 
         mistBaseDrain: 3,
@@ -145,12 +182,12 @@ function createDefaultTideConfig(): TideConfig {
 
 function createDefaultEnemyConfig(): EnemyConfig {
     return {
-        patrolSpeed: 1.2,
-        chaseSpeed: 3.2,
+        patrolSpeed: 1.44,
+        chaseSpeed: 3.84,
         sightRange: 140,
         attackRange: 72,
         verticalTolerance: 70,
-        attackCooldown: 1.8,
+        attackCooldown: 2.16,
         attackStartup: 0.3,
         attackDuration: 0.55,
         hitStunDuration: 0.3,
@@ -158,6 +195,25 @@ function createDefaultEnemyConfig(): EnemyConfig {
         patrolPause: 0.8,
         discoverDuration: 0.45,
         deathDuration: 0.5,
+        rangedAttackRange: 460,
+        rangedAttackDuration: 1.5,
+        rangedAttackTimeScale: 2.0,
+        arrowDamage: 15,
+        arrowSpeed: 900,
+    };
+}
+
+function createDefaultBossConfig(): BossConfig {
+    return {
+        maxHp: 1000,
+        phase2HpRatio: 0.70,
+        phase3HpRatio: 0.35,
+        cloneCount: 1,   // 1 = 不分裂（幻影机制未启用）
+        cloneSpread: 260,
+        splitDamage: 25,
+        splitDamageRadius: 220,
+        reshuffleInterval: 10,
+        identifyRadius: 260,
     };
 }
 
@@ -187,11 +243,15 @@ function createDefaultCombatConfig(): CombatConfig {
 // 里的可调值覆盖它，因此系统需惰性读取（getter），不要缓存。
 // ============================================================
 
-export const gameConfig: { spirit: SpiritConfig; tide: TideConfig; combat: CombatConfig; enemy: EnemyConfig } = {
+export const gameConfig: {
+    spirit: SpiritConfig; tide: TideConfig; combat: CombatConfig;
+    enemy: EnemyConfig; boss: BossConfig;
+} = {
     spirit: createDefaultSpiritConfig(),
     tide: createDefaultTideConfig(),
     combat: createDefaultCombatConfig(),
     enemy: createDefaultEnemyConfig(),
+    boss: createDefaultBossConfig(),
 };
 
 // ============================================================
@@ -263,6 +323,14 @@ export class GameConfig extends Component {
     private switchMergeToMist = 10;
     @property({ group: '形态', displayName: '灵合净化/秒' })
     private mergePurifyCostPerSec = 20;
+    @property({ group: '形态', displayName: '灵合净化伤害/秒' })
+    private mergePurifyDamagePerSec = 30;
+    @property({ group: '形态', displayName: '灵合净化半径' })
+    private mergePurifyRadius = 220;
+    @property({ group: '形态', displayName: '灵合爆发伤害' })
+    private mergeBurstDamage = 50;
+    @property({ group: '形态', displayName: '灵合爆发半径' })
+    private mergeBurstRadius = 340;
     @property({ group: '形态', displayName: '灵合范围攻击' })
     private mergeBurstCost = 30;
     @property({ group: '形态', displayName: '灵合冷却/秒' })
@@ -314,9 +382,9 @@ export class GameConfig extends Component {
 
     // ---- 小怪 ----
     @property({ group: '小怪', displayName: '巡逻速度' })
-    private enemyPatrolSpeed = 1.2;
+    private enemyPatrolSpeed = 1.44;
     @property({ group: '小怪', displayName: '追击速度' })
-    private enemyChaseSpeed = 3.2;
+    private enemyChaseSpeed = 3.84;
     @property({ group: '小怪', displayName: '巡逻范围' })
     private enemyPatrolRange = 140;
     @property({ group: '小怪', displayName: '巡逻点停留/秒' })
@@ -334,7 +402,7 @@ export class GameConfig extends Component {
     @property({ group: '小怪', displayName: '攻击总时长/秒' })
     private enemyAttackDuration = 0.55;
     @property({ group: '小怪', displayName: '攻击间隔/秒' })
-    private enemyAttackCooldown = 1.8;
+    private enemyAttackCooldown = 2.16;
     @property({ group: '小怪', displayName: '对玩家伤害（阳浊普攻）' })
     private enemyYangMeleeDamage = 15;
     @property({ group: '小怪', displayName: '对玩家伤害（阴浊远程）' })
@@ -343,12 +411,42 @@ export class GameConfig extends Component {
     private enemyHitStunDuration = 0.3;
     @property({ group: '小怪', displayName: '死亡表现/秒' })
     private enemyDeathDuration = 0.5;
+    @property({ group: '小怪', displayName: '远程攻击距离' })
+    private enemyRangedAttackRange = 460;
+    @property({ group: '小怪', displayName: '张弓搭箭倍速', tooltip: '越大越快；改了它实际时长也跟着变' })
+    private enemyRangedAttackTimeScale = 2.0;
+    @property({ group: '小怪', displayName: '远程攻击时长/秒', tooltip: '要和攻击动画的帧区间对齐' })
+    private enemyRangedAttackDuration = 1.5;
+    @property({ group: '小怪', displayName: '箭伤害' })
+    private enemyArrowDamage = 15;
+    @property({ group: '小怪', displayName: '箭速度' })
+    private enemyArrowSpeed = 900;
 
     // ---- BOSS ----
+    // 注意：上面这两个不是 Boss 自身数值，是「Boss 打玩家扣多少灵炁」，
+    // 归属 SpiritConfig。九尾狐自己的数值在下面。
     @property({ group: 'BOSS', displayName: '普攻' })
     private bossMeleeDamage = 20;
     @property({ group: 'BOSS', displayName: '技能' })
     private bossSkillDamage = 35;
+    @property({ group: 'BOSS', displayName: '· 九尾狐 总血量' })
+    private bossMaxHp = 1000;
+    @property({ group: 'BOSS', displayName: '· 转 P2 血量比' })
+    private bossPhase2HpRatio = 0.70;
+    @property({ group: 'BOSS', displayName: '· 转 P3 血量比' })
+    private bossPhase3HpRatio = 0.35;
+    @property({ group: 'BOSS', displayName: '· 分身数量' })
+    private bossCloneCount = 1;
+    @property({ group: 'BOSS', displayName: '· 分身散布半宽' })
+    private bossCloneSpread = 260;
+    @property({ group: 'BOSS', displayName: '· 分裂伤害' })
+    private bossSplitDamage = 25;
+    @property({ group: 'BOSS', displayName: '· 分裂伤害半径' })
+    private bossSplitDamageRadius = 220;
+    @property({ group: 'BOSS', displayName: '· 分身重排间隔/秒' })
+    private bossReshuffleInterval = 10;
+    @property({ group: 'BOSS', displayName: '· 灵雾识破半径' })
+    private bossIdentifyRadius = 260;
 
     // ---- 环境伤害 ----
     @property({ group: '环境伤害', displayName: '浊湮接触/秒' })
@@ -378,6 +476,10 @@ export class GameConfig extends Component {
             mistShotCost: this.mistShotCost,
             mergePurifyCostPerSec: this.mergePurifyCostPerSec,
             mergeBurstCost: this.mergeBurstCost,
+            mergePurifyDamagePerSec: this.mergePurifyDamagePerSec,
+            mergePurifyRadius: this.mergePurifyRadius,
+            mergeBurstDamage: this.mergeBurstDamage,
+            mergeBurstRadius: this.mergeBurstRadius,
             blockCost: this.blockCost,
 
             mistBaseDrain: this.mistBaseDrain,
@@ -434,6 +536,23 @@ export class GameConfig extends Component {
             patrolPause: this.enemyPatrolPause,
             discoverDuration: this.enemyDiscoverDuration,
             deathDuration: this.enemyDeathDuration,
+            rangedAttackRange: this.enemyRangedAttackRange,
+            rangedAttackDuration: this.enemyRangedAttackDuration,
+            rangedAttackTimeScale: this.enemyRangedAttackTimeScale,
+            arrowDamage: this.enemyArrowDamage,
+            arrowSpeed: this.enemyArrowSpeed,
+        };
+
+        gameConfig.boss = {
+            maxHp: this.bossMaxHp,
+            phase2HpRatio: this.bossPhase2HpRatio,
+            phase3HpRatio: this.bossPhase3HpRatio,
+            cloneCount: this.bossCloneCount,
+            cloneSpread: this.bossCloneSpread,
+            splitDamage: this.bossSplitDamage,
+            splitDamageRadius: this.bossSplitDamageRadius,
+            reshuffleInterval: this.bossReshuffleInterval,
+            identifyRadius: this.bossIdentifyRadius,
         };
 
         eventBus.emit('game-config-ready', gameConfig);

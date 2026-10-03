@@ -21,6 +21,8 @@ export interface MoveInput {
 export interface MovementParams {
     moveSpeed: number;
     jumpSpeed: number;
+    /** 二段跳（第二跳）的速度倍率。`1` = 和第一跳一样高；调小则二段跳更矮 */
+    secondJumpMult: number;
     maxJumpCount: number;
     dashSpeed: number;
     dashDuration: number;

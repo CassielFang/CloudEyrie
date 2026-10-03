@@ -1,6 +1,6 @@
 import {
     _decorator, Component, Node, Sprite, Label, Font, UITransform, Color,
-    Graphics, UIOpacity, view, resources, warn, instantiate,
+    Graphics, KeyCode, UIOpacity, view, resources, warn, instantiate,
 } from 'cc';
 const { ccclass } = _decorator;
 
@@ -35,6 +35,28 @@ export const COLOR_DIAMOND = new Color(198, 242, 252, 240);
 
 /** 暮色乘算色。见 `ScreenStage.bgTint` 的说明。 */
 export const BG_TINT_DUSK = new Color(132, 158, 180, 255);
+
+/**
+ * 宣纸面板上的墨字（面板标题、设置页的行文字）。
+ *
+ * 放这里而不是面板自己的文件里：面板框架在 `TitleSubPanels`、设置页内容在 `SettingsPanel`，
+ * 两边都要用 —— 放任意一侧都会让这两个文件互相 import。
+ */
+export const COLOR_PANEL_INK = new Color(46, 116, 132, 255);
+
+/** 面板里的次要文字（「按 E 退出」、状态提示）。比 `COLOR_PANEL_INK` 淡一档。 */
+export const COLOR_PANEL_HINT = new Color(92, 124, 138, 235);
+
+/**
+ * 子面板里的「返回 / 取消」键。
+ *
+ * ⚠️ **用 E 而不是 ESC**：Web 上游戏是全屏跑的，而 **ESC 是浏览器保留的「退出全屏」键**
+ * （页面试图拦截也会被浏览器先处理），拿它当返回会「一边关面板一边掉出全屏」。
+ * 改键时「取消」也走同一个键，所以这必须是**唯一一份定义** —— 面板框架
+ * （`TitleSubPanels` 的提示文案）、`TitleScreen`（关面板）、`SettingsPanel`（取消改键）
+ * 三处都读它，各写一份迟早漂移。
+ */
+export const PANEL_BACK_KEY = KeyCode.KEY_E;
 
 /** 灵炁光点：缓慢上浮、出屏后从底部回绕的小光斑。 */
 interface Wisp {
@@ -139,8 +161,14 @@ export abstract class ScreenStage extends Component {
         l.verticalAlign = Label.VerticalAlign.CENTER;
         l.overflow = Label.Overflow.NONE;
         if (this.font) {
-            // 字体可能已经加载完了（节点是之后才建的），补挂一次
+            // 字体已经加载完了（节点是之后才建的），当场补挂，不用记账
             l.font = this.font;
+        }
+        else {
+            // 字体还没到，先记下来等 loadFont 的回调统一补挂。
+            // **字体到位之后就不再记账** —— 否则反复开关子面板会把已销毁的 Label
+            // 一直堆进这个数组（设置页每重建一次就是二十来个）。
+            this.labels.push(l);
         }
         if (outline > 0) {
             // 背景是明暗不定的山水画，不加描边时浅色字会糊进云里
@@ -148,7 +176,6 @@ export abstract class ScreenStage extends Component {
             l.outlineColor = COLOR_OUTLINE;
             l.outlineWidth = outline;
         }
-        this.labels.push(l);
         return l;
     }
 

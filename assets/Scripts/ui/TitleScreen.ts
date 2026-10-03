@@ -1,15 +1,16 @@
 import {
     _decorator, Node, Sprite, Label, UITransform,
-    UIOpacity, Color, Graphics, input, Input, KeyCode, EventKeyboard,
-    EventMouse, tween,
+    UIOpacity, Color, Graphics, input, Input, EventKeyboard,
+    EventMouse, screen, tween,
 } from 'cc';
+import { EDITOR } from 'cc/env';
 const { ccclass } = _decorator;
 
 import { sceneManager } from '../core/SceneManager';
 import { GameAction } from '../core/InputActions';
 import { inputSystem } from '../core/InputSystem';
 import { SubPanelKind, TitleSubPanels } from './TitleSubPanels';
-import { COLOR_GLOW, COLOR_SUB, COLOR_TITLE, ScreenStage } from './ScreenStage';
+import { COLOR_GLOW, COLOR_SUB, COLOR_TITLE, PANEL_BACK_KEY, ScreenStage } from './ScreenStage';
 
 /**
  * 游戏首页（`assets/Scene/Title.scene` 的唯一组件）。
@@ -26,7 +27,7 @@ import { COLOR_GLOW, COLOR_SUB, COLOR_TITLE, ScreenStage } from './ScreenStage';
  * ----
  * Prompt  标题淡入，「按任意键继续」呼吸闪烁 → 任意键 / 点击进入 Menu
  * Menu    五个菜单项错峰淡入，↑↓ 选择、Enter 确认、鼠标悬停即选中
- * Panel   子面板打开，菜单整体压暗；ESC 或点面板外返回 Menu
+ * Panel   子面板打开，菜单整体压暗；E 或点面板外返回 Menu
  */
 
 enum Stage { Prompt, Menu, Panel }
@@ -50,8 +51,14 @@ const LAYOUT = {
 const MENU_LABELS = ['开始游戏', '设　置', '成　就', '退　出', '制作组'];
 const MENU_KINDS: (SubPanelKind | null)[] = [null, 'settings', 'achievements', null, 'credits'];
 
-/** 「开始游戏」要跳的场景名（见 assets/Scene/main.scene.meta） */
-const GAME_SCENE = 'main';
+/**
+ * 「开始游戏」要跳的场景名。
+ *
+ * ⚠️ 关卡现在是 `BossTest.scene`（从 `main.scene` 复制出来重做的版本）——
+ * `main.scene` 还是旧的单屏灰盒。等关卡定型后应当把新关卡改名为 `main`
+ * 并把这里改回去，现在先直连。
+ */
+const GAME_SCENE = 'BossTest';
 
 /** 「退出」先去结束页（`assets/Scene/Ending.scene`），真正的退出动作在那边做 */
 const ENDING_SCENE = 'Ending';
@@ -116,6 +123,12 @@ export class TitleScreen extends ScreenStage {
     protected onDestroy(): void {
         input.off(Input.EventType.KEY_DOWN, this.onKeyDown, this);
         input.off(Input.EventType.MOUSE_DOWN, this.onMouseDown, this);
+        // 子面板的内容对象往 eventBus 上挂过订阅，而 eventBus 活得比场景久 ——
+        // 不摘的话切场景后设置一变还会回调到已销毁的节点上。
+        // 顺带兜住「面板还开着就切场景」时没收掉的改键捕获模式。
+        if (this.panels) {
+            this.panels.dispose();
+        }
     }
 
     // ============================================================ 搭建
@@ -210,6 +223,15 @@ export class TitleScreen extends ScreenStage {
             if (this.stage === Stage.Menu) { this.select(index); this.confirm(); }
         }, this);
 
+        // ⚠️ Prompt 阶段菜单是隐形的，**节点也必须失活**，光靠透明度 0 不够：
+        // 引擎的 UI 派发器一旦被某个节点「处理」了事件，就会 `break` 掉整条派发链
+        // （`PointerEventDispatcher.dispatchEventMouse`），活着的节点会把这一片的点击
+        // 吞掉，全局的 `input.on(MOUSE_DOWN)` 收不到 —— 表现就是「按任意键继续」时
+        // 点到**中间那条菜单带**（5 项首尾相接，320×280）毫无反应，其他地方正常。
+        // 失活节点不吞事件：节点 active 一变，引擎就会 `eventProcessor.setEnabled(active)`
+        //（`scene-graph/node.ts:2181`）。进菜单时由 `enterMenu()` 激活。
+        node.active = false;
+
         return item;
     }
 
@@ -235,10 +257,14 @@ export class TitleScreen extends ScreenStage {
             return;
         }
         if (this.stage === Stage.Panel) {
-            // 面板里暂时没有可操作的内容，ESC 就是唯一的按键行为。
-            // ESC 保留读原始按键，不走动作层 —— 它是「取消/返回」这类系统级语义，
-            // 而且面板阶段只认这一个键，没有重映射的必要。
-            if (e.keyCode === KeyCode.ESCAPE) {
+            // 先问面板内容要不要这个键：设置页改键时 E 是「取消改键」，
+            // 不先问一声就会被这里直接踢出面板。
+            if (this.panels && this.panels.handleKeyDown(e)) {
+                return;
+            }
+            // 面板的返回键是 **E 而不是 ESC**（理由见 `PANEL_BACK_KEY` 的定义）。
+            // 仍读原始按键、不走动作层 —— 它是「取消/返回」这类系统级语义，没有重映射的必要。
+            if (e.keyCode === PANEL_BACK_KEY) {
                 this.closePanel();
             }
             return;
@@ -292,6 +318,12 @@ export class TitleScreen extends ScreenStage {
     private enterMenu(): void {
         this.stage = Stage.Menu;
         this.stageTime = 0;
+        // 菜单项在 Prompt 阶段是失活的（理由见 buildMenuItem），进菜单才激活。
+        // 激活后它们的 MOUSE_* 监听才会生效，也才会开始「吞」点击 —— 那正是菜单要的。
+        for (const item of this.menuItems) {
+            item.node.active = true;
+        }
+        this.requestFullScreen();
         // 按下「任意键」的那一下也会把 MenuConfirm 置位，挡掉下一帧的菜单读取
         this.swallowMenuInput = true;
         if (this.promptNode) {
@@ -311,6 +343,29 @@ export class TitleScreen extends ScreenStage {
         }
         // 循环选择，上下走到底会绕回去
         this.selected = ((index % n) + n) % n;
+    }
+
+    /**
+     * Web 上请求全屏（「启动游戏后全屏」就是这个）。
+     *
+     * **必须落在用户交互里**：浏览器规定全屏只能由用户手势触发，否则报
+     * `API can only be initiated by a user gesture`。所以不能放 `onLoad` ——
+     * 放在 `enterMenu()` 里正好，它是玩家第一次按键/点击的回调。
+     * （引擎内部有兜底：首次失败会在下一次**触摸**事件时自动重试。但别指望它 ——
+     * 那个重试只认触摸，玩家第一次是按键盘的话根本不会触发。）
+     *
+     * 两种情况直接跳过：
+     * - **原生**（Windows 构建）：`supportsFullScreen` 恒为 false，引擎在原生上硬编码 reject。
+     * - **编辑器**：Game View 是 Electron `<webview>`，进不了全屏，调了只会白刷一条错误日志。
+     *   浏览器预览不受影响（那时 `EDITOR` 为 false），所以全屏能在浏览器预览里验。
+     *
+     * 失败时引擎自己会打一条 error 日志（它内部 catch 了），这里不用再处理。
+     */
+    private requestFullScreen(): void {
+        if (EDITOR || !screen.supportsFullScreen || screen.fullScreen()) {
+            return;
+        }
+        void screen.requestFullScreen();
     }
 
     private confirm(): void {

@@ -1,4 +1,5 @@
 import {
+    director,
     _decorator, Component, Node, Vec2, Vec3, Size, Color,
     BoxCollider2D, RigidBody2D, IPhysics2DContact, Contact2DType,
     Prefab, Graphics, Sprite, SpriteFrame, UITransform, Layers, resources, instantiate,
@@ -32,6 +33,7 @@ import { applyFacingFlip, NaturalFacing } from '../core/FacingFlip';
 
 /** 光刃素材本身画的是「弧口朝左、弧背鼓向右」—— 即天然朝右 */
 const SLASH_NATURAL_FACING: NaturalFacing = 1;
+import { PhysicsGroups } from '../core/PhysicsGroups';
 import { spiritEnergySystem } from '../core/SpiritEnergySystem';
 import { gameConfig } from '../core/GameConfig';
 import { CompanionForm, FormContext } from '../character/forms/ICompanionForm';
@@ -114,6 +116,17 @@ export class CombatController extends Component {
 
     // ---- 格挡 ----
     private blocking = false;
+
+    // ---- 灵合形态 ----
+    /** 净化光环的结算间隔 /秒 */
+    private static readonly AURA_TICK = 0.25;
+    /** 可受击目标的重扫间隔 /秒 */
+    private static readonly SCAN_INTERVAL = 1.0;
+    private auraAccum = 0;
+    /** 本次灵合是否已用过灵炁爆发 */
+    private burstUsed = false;
+    private damageables: Damageable[] = [];
+    private scanTimer = 0;
 
     // ---- 命中去重（每次攻击只结算一次） ----
     private hitSet = new Set<Damageable>();
@@ -231,6 +244,8 @@ export class CombatController extends Component {
             this.chargeTime = 0;
             if (this.currentForm === CompanionForm.Mist) {
                 this.fireMistShot();
+            } else if (this.currentForm === CompanionForm.Merge) {
+                this.fireMergeBurst();
             }
         }
         if (inputSystem.wasReleased(GameAction.Attack)) {
@@ -262,6 +277,11 @@ export class CombatController extends Component {
         // 攻击时序推进
         if (this.attacking) {
             this.updateAttackTiming(dt);
+        }
+
+        // 灵合形态：净化光环持续对范围内目标造成伤害
+        if (this.currentForm === CompanionForm.Merge) {
+            this.tickMergeAura(dt);
         }
 
         this.blocking = this.blockHeld && this.currentForm === CompanionForm.Entity;
@@ -453,6 +473,97 @@ export class CombatController extends Component {
         return { spiritCost: amount, perfectBlocked: false };
     }
 
+    // ============ 灵合形态 ============
+
+    /**
+     * 净化光环：灵合形态下**持续**对范围内可受击目标造成伤害。
+     *
+     * 按 `AURA_TICK` 一跳结算，不是每帧 —— 每帧结算会把日志刷爆，
+     * 而且 `DamageInfo` 每帧构造一次纯属浪费。
+     */
+    private tickMergeAura(dt: number): void {
+        this.refreshDamageables(dt);
+        this.auraAccum += dt;
+        if (this.auraAccum < CombatController.AURA_TICK) {
+            return;
+        }
+        const step = this.auraAccum;
+        this.auraAccum = 0;
+        const spirit = gameConfig.spirit;
+        this.damageNearby(spirit.mergePurifyDamagePerSec * step, spirit.mergePurifyRadius);
+    }
+
+    /**
+     * 灵炁爆发：一次性 AOE。**每次灵合只能用一次**（进入灵合时重置）。
+     */
+    private fireMergeBurst(): void {
+        if (this.burstUsed) {
+            log('[Combat] 本次灵合的灵炁爆发已经用过了');
+            return;
+        }
+        const spirit = gameConfig.spirit;
+        if (!spiritEnergySystem.canConsume(spirit.mergeBurstCost)) {
+            log('[Combat] 灵炁不足，无法灵炁爆发');
+            return;
+        }
+        spiritEnergySystem.consume(spirit.mergeBurstCost);
+        this.burstUsed = true;
+        this.refreshDamageables(99);          // 强制重扫一次，保证打的是当下的目标
+        const hit = this.damageNearby(spirit.mergeBurstDamage, spirit.mergeBurstRadius);
+        log(`[Combat] 灵炁爆发！命中 ${hit} 个目标`);
+    }
+
+    /**
+     * 对半径内的可受击目标造成伤害。
+     *
+     * 走 `Damageable.takeDamage`（和玩家普攻同一条链路），所以敌人的
+     * 受击/死亡表现都自动生效；`sourceForm` 传 Merge，供将来区分「净化伤害」。
+     */
+    private damageNearby(amount: number, radius: number): number {
+        if (amount <= 0) {
+            return 0;
+        }
+        const p = this.node.worldPosition;
+        let hit = 0;
+        for (const d of this.damageables) {
+            if (!d.isValid || d.isDead()) {
+                continue;
+            }
+            const wp = d.node.worldPosition;
+            const dx = wp.x - p.x;
+            const dy = wp.y - p.y;
+            if (dx * dx + dy * dy > radius * radius) {
+                continue;
+            }
+            d.takeDamage({ amount, knockback: new Vec2(0, 0), sourceForm: CompanionForm.Merge });
+            hit += 1;
+        }
+        return hit;
+    }
+
+    /**
+     * 缓存场景里的可受击目标。
+     *
+     * 每帧全场景遍历太贵，所以按 `SCAN_INTERVAL` 扫一次。
+     * `forceDt` 传大值时立刻重扫（灵炁爆发前要保证打的是当下的目标）。
+     */
+    private refreshDamageables(dt: number): void {
+        this.scanTimer -= dt;
+        if (this.scanTimer > 0 && this.damageables.length > 0) {
+            return;
+        }
+        this.scanTimer = CombatController.SCAN_INTERVAL;
+        const out: Damageable[] = [];
+        const scene = director.getScene();
+        scene?.walk((n): void => {
+            const d = n.getComponent(Damageable);
+            if (d && d.node !== this.node) {
+                out.push(d);
+            }
+        });
+        this.damageables = out;
+    }
+
     // ============ 灵雾灵弹 ============
 
     private fireMistShot(): void {
@@ -465,16 +576,20 @@ export class CombatController extends Component {
 
         const combat = gameConfig.combat;
         const facing = this.ctx ? this.ctx.facing : 1;
+        // 传大 dt 强制重扫一次，保证打的是当下的目标（灵弹靠这份列表做重叠判定）
+        this.refreshDamageables(1e9);
         this.spawnMistShot(
             new Vec2(facing, 0),
             combat.mistShotSpeed,
             combat.baseLightDamage * combat.mistShotDamageRatio,
             combat.mistShotLifetime,
+            this.damageables,
         );
         log('[Combat] 灵弹发射');
     }
 
-    private spawnMistShot(dir: Vec2, speed: number, damage: number, lifetime: number): void {
+    private spawnMistShot(dir: Vec2, speed: number, damage: number, lifetime: number,
+                          targets: Damageable[]): void {
         const parent = this.node.parent;
         if (!parent) {
             return;
@@ -498,7 +613,7 @@ export class CombatController extends Component {
         );
 
         const shot = shotNode.getComponent(MistShot) ?? shotNode.addComponent(MistShot);
-        shot.init(dir, speed, damage, lifetime);
+        shot.init(dir, speed, damage, lifetime, targets);
     }
 
     /** 灰盒兜底：无 prefab 时程序化生成灵弹（素材 + 刚体 + 碰撞盒 + MistShot） */
@@ -525,9 +640,44 @@ export class CombatController extends Component {
         rb.gravityScale = 0;
         rb.linearDamping = 0;
         rb.bullet = true;
+        // 休眠后 Box2D 不再评估接触 —— 和 AttackHitBox、MinionArrow 一致
+        rb.allowSleep = false;
+        rb.fixedRotation = true;
+        // ⚠️⚠️ **这一句是灵弹「打不中、直接穿过」的根因，别删。**
+        //
+        // `RigidBody2D.enabledContactListener` 默认 **false**，而引擎里有两处卡它：
+        //   `shape-2d.ts` 的 `_init()`：只有它为 true 才 `registerContactFixture(fixture)`
+        //   `physics-contact.ts` 的 `emit()`：只有它为 true 才 `collider.emit(BEGIN_CONTACT…)`
+        // 场景里 `AttackHitBox` / `Qinghe` 是在 Inspector 勾上的（`.scene` 里
+        // `enabledContactListener: true`），所以近战和挨箭都正常；
+        // 灵弹的刚体是**运行时 addComponent 建的**，没人勾 → 恒为 false
+        // → `MistShot.onBeginContact` 一次也不会被调用（症状：有弹、穿过去、无伤害、不自毁）。
+        //
+        // ⚠️ 必须在**碰撞体被启用之前**设好：夹具是在 `onEnable` 里建的，
+        // 注册与否在那一刻就定死了，之后再改这个字段**不会**补注册。
+        // 这里是刚加完刚体、还没加碰撞体、节点也还没挂进场景，正是安全时机。
+        rb.enabledContactListener = true;
 
         const col = node.addComponent(BoxCollider2D);
         col.size = new Size(MIST_SHOT_BODY, MIST_SHOT_BODY);
+        // ⚠️ 配法照抄 `MinionArrow` / `AttackHitBox`（本项目已验证可用的抛射物/判定盒）：
+        //   **sensor** —— 只报接触，不产生任何物理推力。
+        //   非 sensor 时灵弹会和敌人的 Dynamic 刚体做真物理碰撞，
+        //   把敌人（以及出生瞬间与它重叠的玩家）顶开 —— `MinionArrow` 当年就是
+        //   因为「非 sensor」被反馈「不是射在我身上，是把我撞飞了」。
+        //   **group = HITBOX** —— 碰撞矩阵里 `HITBOX` 只和 `ENEMY` 碰：
+        //   打得中敌人、穿得过地形、也不会和 `PLAYER`（自己人）发生任何接触。
+        //   不设的话默认是 `WORLD`，会和玩家、地面都碰。
+        col.sensor = true;
+        col.group = PhysicsGroups.HITBOX;
+        // `apply()` 在**这里其实是空操作**：`Collider2D.apply()` 发现
+        // `enabledInHierarchy === false`（节点还没挂进场景）时会跳过重建。
+        // 夹具是挂进场景时由 `onEnable → _callAfterStep(_init)` 建的，那时读的
+        // 已经是当前的 `size`，所以尺寸不会错。
+        // （此前这里注释说「不调 apply 夹具就是 1×1」—— 读引擎源码后确认那个结论
+        //   对**还没挂进场景**的节点不成立，灵弹真正的病根是上面那个开关。
+        //   留着这一句是为了「节点已挂载时复用」的正确性。）
+        col.apply();
 
         node.addComponent(MistShot);
         return node;
@@ -621,6 +771,11 @@ export class CombatController extends Component {
 
     private onFormChanged(event: CompanionFormChangedEvent): void {
         this.currentForm = event.current;
+        // 每次重新进入灵合，灵炁爆发重置（设计：每次灵合只能用一次）
+        if (event.current === CompanionForm.Merge && event.previous !== CompanionForm.Merge) {
+            this.burstUsed = false;
+            this.auraAccum = 0;
+        }
         this.cancelAttack();
         this.attackHeld = false;
         this.blockHeld = false;
